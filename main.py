@@ -1,4 +1,5 @@
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -18,6 +19,13 @@ BugInfo = TypedDict(
 )
 
 
+def get_files_from_patch(patch_content: str) -> List[str]:
+    """Extracts file paths from a git diff patch."""
+    # Matches lines like '--- a/src/black/__init__.py'
+    # and captures 'src/black/__init__.py'
+    return re.findall(r"^\-\-\- a/(.+)$", patch_content, re.MULTILINE)
+
+
 def main():
     # Create output directory if it doesn't exist
     base_output_dir = Path("output").resolve()  # Use absolute path
@@ -35,9 +43,16 @@ def main():
         good_install_dir = base_install_dir / "good"
         good_config = configure_and_setup(info, good_install_dir, base_output_dir, True)
 
-        shutil.copy(
-            good_install_dir / "black" / "black.py", bug_output_dir / "good_black.py"
-        )
+        good_patch_files = get_files_from_patch(info["correct_patch"])
+        good_output_path = bug_output_dir / "good"
+        good_output_path.mkdir(exist_ok=True)
+
+        for file in good_patch_files:
+            src_file = good_install_dir / "black" / file
+            dest_file = good_output_path / file
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src_file, dest_file)
+
         output_good_diff(info["correct_patch"], bug_output_dir)
 
         # run on good
@@ -78,32 +93,56 @@ def main():
 
         output_bad_diff(bad_diff, bug_output_dir)
 
-        # Copy the BUGGY version first (since we want to create a "bad fix" from the buggy version)
-        shutil.copy(
-            bad_install_dir / "black" / "black.py", bug_output_dir / "bad_black.py"
-        )
-        apply_bad_patch_with_git_diff(bug_output_dir / "bad_patch.txt", bug_output_dir)
+        # Apply the bad patch to the buggy version
+        apply_patch(bug_output_dir / "bad_patch.txt", bad_install_dir / "black")
+
+        print("DEBUG: Getting files from bad patch...")
+        bad_patch_files = get_files_from_patch(bad_diff)
+        print(f"DEBUG: Found {len(bad_patch_files)} files in bad patch.")
+
+        print("DEBUG: Copying patched files...")
+        bad_output_path = bug_output_dir / "bad"
+        bad_output_path.mkdir(exist_ok=True)
+
+        for file in bad_patch_files:
+            src_file = bad_install_dir / "black" / file
+            dest_file = bad_output_path / Path(file).name
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src_file, dest_file)
+        print("DEBUG: Finished copying patched files.")
 
         if not os.path.exists(bug_output_dir / "bad_callgraph.txt"):
             print(
                 f"Running tracer for bug {info['bug_number']} for bad_callgraph.txt..."
             )
-            result = subprocess.run(
-                [
-                    bad_config["python_path"],
-                    bad_config["tracer_script_path"],
-                    "--bug-number",
-                    str(info["bug_number"]),
-                    "--version",
-                    "bad",
-                    "--file-path",
-                    str(bug_output_dir / "bad_black.py"),
-                ]
-                + info["args"],
-                cwd=bad_config["temp_dir"] + "/black",
-                env=bad_config["env"],
-                text=True,
-            )
+            try:
+                result = subprocess.run(
+                    [
+                        bad_config["python_path"],
+                        bad_config["tracer_script_path"],
+                        "--bug-number",
+                        str(info["bug_number"]),
+                        "--version",
+                        "bad",
+                    ]
+                    + info["args"],
+                    cwd=bad_config["temp_dir"] + "/black",
+                    env=bad_config["env"],
+                    text=True,
+                    capture_output=True,
+                    timeout=300,  # 5-minute timeout
+                )
+                print(f"Tracer finished with return code: {result.returncode}")
+                if result.returncode != 0:
+                    print(f"Tracer STDOUT: {result.stdout}")
+                    print(f"Tracer STDERR: {result.stderr}")
+            except subprocess.TimeoutExpired as e:
+                print(f"ERROR: Tracer for bug {info['bug_number']} timed out.")
+                print(f"STDOUT: {e.stdout}")
+                print(f"STDERR: {e.stderr}")
+
+        # Add a break to only process one bug for now
+        # break
 
 
 def output_good_diff(diff: str, output_dir: Path):
@@ -117,24 +156,48 @@ def output_bad_diff(diff: str, output_dir: Path):
 
 
 def create_bad_diff(good_diff: str) -> str | None:
-    system_prompt = """
-    - Receive a GOOD patch that fixes a bug
-    - Create a BAD patch that with a buggy fix
-    - The output of this call will be passed directly to patch utility tool so do NOT include markdown or aditional text
-    - Ensure the diff patch is the correct format
-    - Ensure the ALL the diff offset and are correct (@@ -X,Y +Z,W @@)
-    - Verify the offset numbers are correct for each patch
+    # system_prompt = """
+    # You are a program that takes a correct patch that fixes a bug and outputs a incorrect patch with a buggy fix.
 
-    Input: Good patch
-    Output: Bad patch (same structure, only the actual changes are different)
+    # Rules:
+    # - The output must be a valid diff in patch format (usable with `patch`).
+    # - The output must preserve diff metadata (headers, offsets, index lines).
+    # - Only modify the lines with '-' and '+'.
+    # - Keep diff offsets (`@@ -X,Y +Z,W @@`) accurate after changes.
+    # - Do NOT include any markdown, comments, or explanation—only the raw diff.
+    # - Do NOT add or remove lines outside the modified lines.
+    # - The output will be parsed and validated automatically.
+    # """
+    system_prompt = """
+    You are a program that takes a correct patch that fixes a bug and outputs a incorrect patch with a buggy fix.
+
+    Rules:
+    - The output must be a valid diff in patch format (usable with `patch`)
+    - The output must preserve diff metadata (headers, offsets, index lines)
+    - Only modify the lines with '-' and '+'
+    - Ensure the diff hunk ranges (`@@ -X,Y +Z,W @@`) are accurate after changes
+    - Do NOT include any markdown, comments, or explanation—only the raw diff.
+    - The output will be parsed and validated automatically.
     """
+    # system_prompt = """
+    # You are a program that takes a correct patch that fixes a bug and outputs a incorrect patch with a buggy fix.
+
+    # Rules:
+    # - The output must be a valid diff in patch format (usable with `patch`).
+    # - The output must preserve diff metadata (headers, offsets, index lines).
+    # - Only modify the lines with '-' and '+'.
+    # - Keep diff hunk ranges (`@@ -X,Y +Z,W @@`) are accurate after changes.
+    # - To have a valid diff, modify the add and removed lines instead of changing the offset numbers
+    # - Do NOT include any markdown, comments, or explanation—only the raw diff.
+    # - The output will be parsed and validated automatically.
+    # """
 
     client = OpenAI(
         # base_url="http://host.docker.internal:1234/v1",
         api_key=OPENAI_API_KEY
     )
     completion = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-4.1-nano",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": good_diff},
@@ -296,52 +359,31 @@ def process_bug_folder(bug_path: Path) -> BugInfo:
     return BugInfo(bug_number=bug_number, correct_patch=diff, args=args)
 
 
-def apply_bad_patch_with_git_diff(bad_patch_path: Path, bug_output_dir: Path):
-    bad_black_path = bug_output_dir / "bad_black.py"
+def apply_patch(patch_path: Path, target_dir: Path):
+    """Applies a patch to a target directory."""
+    if not patch_path.exists() or patch_path.stat().st_size == 0:
+        raise Exception(f"Patch file is missing or empty: {patch_path}")
 
-    # Check if patch file exists and is not empty
-    if not bad_patch_path.exists():
-        raise Exception(f"Bad patch file does not exist: {bad_patch_path}")
-
-    # Read and validate patch content
-    with open(bad_patch_path, "r", encoding="utf-8") as f:
-        patch_content = f.read()
-
-    if not patch_content.strip():
-        raise Exception(f"Bad patch file is empty: {bad_patch_path}")
-
-    print(f"DEBUG: Patch file size: {len(patch_content)} characters")
-    print(f"DEBUG: Patch ends with newline: {patch_content.endswith('\n')}")
-
-    # Ensure patch ends with newline
-    if not patch_content.endswith("\n"):
-        print("WARNING: Patch doesn't end with newline, adding one")
-        with open(bad_patch_path, "w", encoding="utf-8") as f:
-            f.write(patch_content + "\n")
-
-    # Apply patch with better error handling
+    # The -p1 option strips the 'a/' and 'b/' prefixes from file paths in the patch
+    # The -N option ignores patches that seem to be reversed or already applied.
     result = subprocess.run(
-        ["patch", str(bad_black_path), str(bad_patch_path)],
-        cwd=str(bug_output_dir),
+        ["patch", "-p1", "-N", "-i", str(patch_path)],
+        cwd=str(target_dir),
         capture_output=True,
         text=True,
     )
 
-    if result.returncode != 0:
-        print(f"ERROR: Patch failed with return code {result.returncode}")
+    if result.returncode == 0:
+        print(f"SUCCESS: Patch {patch_path} applied successfully to {target_dir}")
+    elif "Reversed (or previously applied) patch detected!" in result.stdout:
+        print(
+            f"INFO: Patch at {patch_path} was already applied or is reversed. Continuing."
+        )
+    else:
+        print(f"ERROR: Patch failed for {patch_path} in {target_dir}")
         print(f"STDOUT: {result.stdout}")
         print(f"STDERR: {result.stderr}")
-
-        # Show patch content for debugging
-        print("DEBUG: Patch content preview:")
-        print(
-            patch_content[:500] + "..." if len(patch_content) > 500 else patch_content
-        )
-
         raise Exception(f"Failed to apply patch: {result.stderr}")
-
-    print("SUCCESS: Patch applied successfully")
-    print(f"Patch output: {result.stdout}")
 
 
 if __name__ == "__main__":

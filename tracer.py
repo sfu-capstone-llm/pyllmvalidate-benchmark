@@ -13,9 +13,8 @@ def main():
     # Extract bug number and version from sys.argv
     bug_number = None
     version = None
-    file_path = None
     filtered_argv = []
-    i = 0
+    i = 1  # Start from 1 to skip script name
     while i < len(sys.argv):
         if sys.argv[i] == "--bug-number" and i + 1 < len(sys.argv):
             bug_number = sys.argv[i + 1]
@@ -25,18 +24,13 @@ def main():
             version = sys.argv[i + 1]
             i += 2
             continue
-        elif sys.argv[i] == "--file-path" and i + 1 < len(sys.argv):
-            file_path = sys.argv[i + 1]
-            i += 2
-            continue
         else:
             filtered_argv.append(sys.argv[i])
             i += 1
 
-    sys.argv = filtered_argv
+    sys.argv = [sys.argv[0]] + filtered_argv
     print(f"DEBUG: bug_number = {bug_number}")
     print(f"DEBUG: version = {version}")
-    print(f"DEBUG: file_path = {file_path}")
     print(f"DEBUG: filtered sys.argv = {sys.argv}")
 
     if len(sys.argv) < 2:
@@ -49,7 +43,7 @@ def main():
     print(f"DEBUG: entry = {entry}")
     print("DEBUG: About to call build_call_graph")
 
-    call_graph_result = build_call_graph(entry, "./", ["tests.test_black"], file_path)
+    call_graph_result = build_call_graph(entry, "./", ["tests.test_black"])
 
     print(f"DEBUG: call_graph_result length = {len(call_graph_result)}")
 
@@ -76,9 +70,7 @@ def main():
     print(f"Call graph written to {output_file}")
 
 
-def build_call_graph(
-    entry: str, project_dir: str, exlude_list: List[str], file_path: str = None
-):
+def build_call_graph(entry: str, project_dir: str, exlude_list: List[str]):
     call_graph = defaultdict(set)
     call_stack = []
 
@@ -117,17 +109,6 @@ def build_call_graph(
 
     sys.settrace(tracefunc)
     try:
-        if file_path:
-            # Import the bad_black.py file and replace the black module with it
-            import importlib.util
-
-            spec = importlib.util.spec_from_file_location("black", file_path)
-            bad_black_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(bad_black_module)
-
-            # Replace black module in sys.modules so unittest imports the bad version
-            sys.modules["black"] = bad_black_module
-
         runpy.run_module(entry, run_name="__main__")
     except SystemExit:
         # unittest calls sys.exit(), catch it to continue execution

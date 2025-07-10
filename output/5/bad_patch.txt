@@ -1,5 +1,5 @@
 diff --git a/black.py b/black.py
-index 635eba2..a4b1c3d 100644
+index 635eba2..8318674 100644
 --- a/black.py
 +++ b/black.py
 @@ -1352,7 +1352,10 @@ class Line:
@@ -27,7 +27,7 @@ index 635eba2..a4b1c3d 100644
 +                l.type == token.COMMA for l in leaves
 +            )
 +
-+            if original.is_import or no_commas:
++            if original.is_import and not no_commas:
                  for i in range(len(leaves) - 1, -1, -1):
                      if leaves[i].type == STANDALONE_COMMENT:
                          continue

@@ -1,5 +1,5 @@
 diff --git a/black.py b/black.py
-index f7022d8..a3b4c2d 100644
+index f7022d8..05edf1a 100644
 --- a/black.py
 +++ b/black.py
 @@ -1480,7 +1480,13 @@ class EmptyLineTracker:
@@ -11,7 +11,7 @@ index f7022d8..a3b4c2d 100644
 +            # Black should not insert empty lines at the beginning
 +            # of the file
 +            0
-+            if self.previous_line is None
++            if self.previous_line is not None
 +            else before - self.previous_after
 +        )
          self.previous_after = after

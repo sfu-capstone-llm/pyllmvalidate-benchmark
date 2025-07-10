@@ -7,13 +7,13 @@ index 2a913fc..fc1597a 100644
          # Work around https://bugs.python.org/issue26903
          worker_count = min(worker_count, 61)
 -    executor = ProcessPoolExecutor(max_workers=worker_count)
-+    try:
-+        executor = ProcessPoolExecutor(max_workers=worker_count)
-+    except OSError:
-+        # we arrive here if the underlying system does not support multi-processing
-+        # like in AWS Lambda, in which case we gracefully fallback to the default
-+        # mono-process Executor by using None
-+        executor = None
++    # Intentionally create a buggy fix: always set executor to None, ignoring worker_count
++    executor = None
++
++    # This buggy fix removes the try-except and always disables multiprocessing
++    # which may cause performance degradation or other issues
++
++    # Note: no fallback to ProcessPoolExecutor at all
 +
      try:
          loop.run_until_complete(
@@ -23,8 +23,8 @@ index 2a913fc..fc1597a 100644
      finally:
          shutdown(loop)
 -        executor.shutdown()
-+        if executor is not None:
-+            executor.shutdown()
++        # Bug: call shutdown on None, will raise AttributeError
++        executor.shutdown()
  
  
  async def schedule_formatting(
@@ -33,6 +33,7 @@ index 2a913fc..fc1597a 100644
      report: "Report",
      loop: asyncio.AbstractEventLoop,
 -    executor: Executor,
-+    executor: Optional[Executor],
++    executor: Executor,
  ) -> None:
      """Run formatting of `sources` in parallel using the provided `executor`.
+ 
