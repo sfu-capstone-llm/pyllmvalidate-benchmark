@@ -4,7 +4,8 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, TypedDict
+from typing import List, TypedDict, Dict, Tuple
+from gen import gen_bad_file
 
 from dotenv import load_dotenv
 
@@ -12,11 +13,16 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KDY")
 
-from openai import OpenAI
+from gen.gen import create_bad_diff
 
 BugInfo = TypedDict(
     "BugInfo", {"bug_number": int, "correct_patch": str, "args": List[str]}
 )
+
+
+class DiffInfo(TypedDict):
+    rel_file_path: str
+    diff_content: str
 
 
 def get_files_from_patch(patch_content: str) -> List[str]:
@@ -49,7 +55,7 @@ def main():
 
         for file in good_patch_files:
             src_file = good_install_dir / "black" / file
-            dest_file = good_output_path / file
+            dest_file = good_output_path / file.replace("/", "-")
             dest_file.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(src_file, dest_file)
 
@@ -78,18 +84,50 @@ def main():
             print(f"Call graph written to: {bug_output_dir}")
             print(f"Return code: {result.returncode}")
 
+        # For each good file, prompt the ai with the good file and the diff for that file
         bad_install_dir = base_install_dir / "bad"
-        bad_config = configure_and_setup(info, bad_install_dir, base_output_dir, False)
+        good_project_dir = good_install_dir / "black"
+        diffs_info = process_diff(
+            info["bug_number"], info["correct_patch"], good_project_dir
+        )
 
-        bad_diff = ""
-        if not os.path.exists(bug_output_dir / "bad_patch.txt"):
-            bad_diff = create_bad_diff(info["correct_patch"])
-            if bad_diff is None:
-                raise Exception("Could not generate bad_diff from good diff", info)
-        else:
-            print("Using previous bad_patch.txt")
-            with open(bug_output_dir / "bad_patch.txt") as f:
-                bad_diff = f.read()
+        bad_diff = get_bad_diff(info["correct_patch"], bug_output_dir / "bad_patch.txt")
+        bad_diffs_info = process_diff(
+            info["bug_number"], bad_diff, bad_install_dir / "black"
+        )
+        output_bad_diff(bad_diff, bug_output_dir)
+
+        for key, good_diff_info in diffs_info.items():
+            bug_number, file_path_str = key
+            file_path = Path(file_path_str)
+            rel_file_path = good_diff_info["rel_file_path"]
+
+            original_buggy_file_path = bad_install_dir / "black" / rel_file_path
+            original_buggy_content = original_buggy_file_path.read_text()
+
+            bad_diff_info = bad_diffs_info.get(key)
+
+            print("gen bad file...")
+            bad_file_str = gen_bad_file(
+                bad_diff_info["diff_content"], original_buggy_content
+            )
+            print("finished gen bad file")
+
+            # Create bad file from str
+            bad_output_file = bug_output_dir / "bad" / file_path.name
+            bad_output_file.parent.mkdir(exist_ok=True, parents=True)
+            with open(bad_output_file, "w") as f:
+                f.write(bad_file_str)
+
+            # apply bad file to bad proj
+            shutil.copy(
+                bad_output_file,
+                bad_install_dir / "black" / rel_file_path,
+            )
+
+        break
+
+        bad_config = configure_and_setup(info, bad_install_dir, base_output_dir, False)
 
         output_bad_diff(bad_diff, bug_output_dir)
 
@@ -145,6 +183,49 @@ def main():
         # break
 
 
+def process_diff(
+    bug_number: str, diff: str, base_install_path: Path
+) -> Dict[Tuple[str, str], DiffInfo]:
+    if not diff.strip():
+        return []
+
+    diffs_info: Dict[Tuple[str, str], DiffInfo] = {}
+    diff_parts: List[str] = []
+
+    if not diff.startswith("diff --git"):
+        raise Exception("diff does not have diff --git in it")
+
+    raw_parts = diff.split("diff --git ")[1:]
+    diff_parts = ["diff --git " + part for part in raw_parts]
+
+    for diff_content in diff_parts:
+        # Matches lines like '--- a/src/black/__init__.py'
+        match = re.search(r"^\-\-\- a/(.+)$", diff_content, re.MULTILINE)
+        if not match:
+            raise Exception("couldn't not get name from diff")
+
+        file_name = match.group(1).strip()
+        diffs_info[(str(bug_number), file_name)] = {
+            "rel_file_path": file_name,
+            "diff_content": diff_content,
+        }
+
+    return diffs_info
+
+
+def get_bad_diff(good_diff: str, bad_diff_path: str) -> str:
+    if not os.path.exists(bad_diff_path):
+        bad_diff = create_bad_diff(good_diff)
+        if bad_diff is None:
+            raise Exception("Could not generate bad_diff from good diff")
+    else:
+        print("Using previous bad_patch.txt")
+        with open(bad_diff_path) as f:
+            bad_diff = f.read()
+
+    return bad_diff
+
+
 def output_good_diff(diff: str, output_dir: Path):
     with open(output_dir / "good_patch.txt", "w") as f:
         f.write(diff)
@@ -153,58 +234,6 @@ def output_good_diff(diff: str, output_dir: Path):
 def output_bad_diff(diff: str, output_dir: Path):
     with open(output_dir / "bad_patch.txt", "w") as f:
         f.write(diff)
-
-
-def create_bad_diff(good_diff: str) -> str | None:
-    # system_prompt = """
-    # You are a program that takes a correct patch that fixes a bug and outputs a incorrect patch with a buggy fix.
-
-    # Rules:
-    # - The output must be a valid diff in patch format (usable with `patch`).
-    # - The output must preserve diff metadata (headers, offsets, index lines).
-    # - Only modify the lines with '-' and '+'.
-    # - Keep diff offsets (`@@ -X,Y +Z,W @@`) accurate after changes.
-    # - Do NOT include any markdown, comments, or explanation—only the raw diff.
-    # - Do NOT add or remove lines outside the modified lines.
-    # - The output will be parsed and validated automatically.
-    # """
-    system_prompt = """
-    You are a program that takes a correct patch that fixes a bug and outputs a incorrect patch with a buggy fix.
-
-    Rules:
-    - The output must be a valid diff in patch format (usable with `patch`)
-    - The output must preserve diff metadata (headers, offsets, index lines)
-    - Only modify the lines with '-' and '+'
-    - Ensure the diff hunk ranges (`@@ -X,Y +Z,W @@`) are accurate after changes
-    - Do NOT include any markdown, comments, or explanation—only the raw diff.
-    - The output will be parsed and validated automatically.
-    """
-    # system_prompt = """
-    # You are a program that takes a correct patch that fixes a bug and outputs a incorrect patch with a buggy fix.
-
-    # Rules:
-    # - The output must be a valid diff in patch format (usable with `patch`).
-    # - The output must preserve diff metadata (headers, offsets, index lines).
-    # - Only modify the lines with '-' and '+'.
-    # - Keep diff hunk ranges (`@@ -X,Y +Z,W @@`) are accurate after changes.
-    # - To have a valid diff, modify the add and removed lines instead of changing the offset numbers
-    # - Do NOT include any markdown, comments, or explanation—only the raw diff.
-    # - The output will be parsed and validated automatically.
-    # """
-
-    client = OpenAI(
-        # base_url="http://host.docker.internal:1234/v1",
-        api_key=OPENAI_API_KEY
-    )
-    completion = client.chat.completions.create(
-        model="gpt-4.1-nano",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": good_diff},
-        ],
-        temperature=0.3,
-    )
-    return completion.choices[0].message.content
 
 
 def configure_and_setup(info, instal_dir: Path, output_dir: Path, isGood: bool):
