@@ -31,7 +31,6 @@ __credits__ = \
 
 import re
 from codecs import BOM_UTF8, lookup
-from attr import dataclass
 from blib2to3.pgen2.token import *
 
 from . import token
@@ -137,10 +136,6 @@ single_quoted = (
 )
 
 tabsize = 8
-
-@dataclass(frozen=True)
-class TokenizerConfig:
-    async_is_reserved_keyword: bool = False
 
 class TokenError(Exception): pass
 
@@ -339,7 +334,7 @@ def untokenize(iterable):
     ut = Untokenizer()
     return ut.untokenize(iterable)
 
-def generate_tokens(readline, config: TokenizerConfig = TokenizerConfig()):
+def generate_tokens(readline):
     """
     The generate_tokens() generator requires one argument, readline, which
     must be a callable object which provides the same interface as the
@@ -361,9 +356,6 @@ def generate_tokens(readline, config: TokenizerConfig = TokenizerConfig()):
     contline = None
     indents = [0]
 
-    # If we know we're parsing 3.7+, we can unconditionally parse `async` and
-    # `await` as keywords.
-    async_is_reserved_keyword = config.async_is_reserved_keyword
     # 'stashed' and 'async_*' are used for async/await parsing
     stashed = None
     async_def = False
@@ -514,7 +506,7 @@ def generate_tokens(readline, config: TokenizerConfig = TokenizerConfig()):
                         yield (STRING, token, spos, epos, line)
                 elif initial.isidentifier():               # ordinary name
                     if token in ('async', 'await'):
-                        if async_is_reserved_keyword or async_def:
+                        if async_def:
                             yield (ASYNC if token == 'async' else AWAIT,
                                    token, spos, epos, line)
                             continue

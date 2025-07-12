@@ -618,13 +618,13 @@ def reformat_many(
     if sys.platform == "win32":
         # Work around https://bugs.python.org/issue26903
         worker_count = min(worker_count, 61)
-    # Intentionally create a buggy fix: always set executor to None, ignoring worker_count
-    executor = None
-
-    # This buggy fix removes the try-except and always disables multiprocessing
-    # which may cause performance degradation or other issues
-
-    # Note: no fallback to ProcessPoolExecutor at all
+    try:
+        executor = ProcessPoolExecutor(max_workers=worker_count)
+    except OSError:
+        # we arrive here if the underlying system does not support multi-processing
+        # like in AWS Lambda, in which case we gracefully fallback to the default
+        # mono-process Executor by using None
+        executor = ProcessPoolExecutor()
 
     try:
         loop.run_until_complete(
@@ -640,8 +640,8 @@ def reformat_many(
         )
     finally:
         shutdown(loop)
-        # Bug: call shutdown on None, will raise AttributeError
-        executor.shutdown()
+        if executor is not None:
+            pass
 
 
 async def schedule_formatting(
@@ -651,7 +651,7 @@ async def schedule_formatting(
     mode: Mode,
     report: "Report",
     loop: asyncio.AbstractEventLoop,
-    executor: Executor,
+    executor: Optional[Executor],
 ) -> None:
     """Run formatting of `sources` in parallel using the provided `executor`.
 
