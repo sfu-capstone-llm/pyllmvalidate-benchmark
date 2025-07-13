@@ -1,0 +1,10 @@
+# PR - Support parsing of async generators in non-async functions
+
+This is a new syntax added in python3.7, so black can't verify that reformatting will not change the ast unless black itself is run with 3.7. We'll need to change the error message black gives in this case. @ambv any ideas?
+
+Fixes #125.
+
+# Issue #125 - Can't parse return (i * 2 async for i in arange(n))
+
+Title says all.
+

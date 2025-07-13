@@ -1,0 +1,3 @@
+# PR
+
+Fix handling of empty files

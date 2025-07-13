@@ -1,0 +1,34 @@
+# PR
+
+Remove standalone comment hacks
+Now Black properly splits standalone comments within bracketed expressions.
+They are treated as another type of split instead of being bolted on with
+whitespace prefixes.
+
+A related fix: now multiple comments might appear after a given leaf.
+
+Fixes #22
+
+# Issue #22 - Standalone comments inside nested bracketed expressions block the expression from wrapping
+
+This is... not what I expected black to do :-)
+
+     # Capture each of the exceptions in the MultiError along with each of their causes and contexts
+     if isinstance(exc_value, MultiError):
+         embedded = []
+         for exc in exc_value.exceptions:
+             if exc not in _seen:
+                 embedded.append(
+-                    traceback.TracebackException.from_exception(
+-                        exc,
+-                        limit=limit,
+-                        lookup_lines=lookup_lines,
+-                        capture_locals=capture_locals,
+-                        # copy the set of _seen exceptions so that duplicates
+-                        # shared between sub-exceptions are not omitted
+-                        _seen=set(_seen)
+-                    )
++                    traceback.TracebackException.from_exception(exc, limit=limit, lookup_lines=lookup_lines, capture_locals=capture_locals, _seen=set(_seen))
++                    # copy the set of _seen exceptions so that duplicates
++                    # shared between sub-exceptions are not omitted
+                 )

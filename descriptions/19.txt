@@ -1,0 +1,32 @@
+# PR - [#154] Handle comments between decorators properly
+
+# Issue #154 - Adds blank lines after comment between decorators
+
+Given t.py:
+
+@property
+# TODO: X
+@property
+def foo():
+    pass
+Running black --diff t.py gives:
+
+--- t-black.py  (original)
++++ t-black.py  (formatted)
+@@ -1,6 +1,8 @@
+ @property
+ # TODO: X
++
++
+ @property
+ def foo():
+     pass
+Where flake8 then complains:
+
+stdin:5:1: E304 blank lines found after function decorator
+
+Operating system: Arch Linux
+Python version: 3.6.5
+Black version: 18.4a2
+Does also happen on master: Haven't checked.
+

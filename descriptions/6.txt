@@ -1,0 +1,32 @@
+# PR
+
+Add support for always tokenizing async/await as keywords
+Fixes #593
+
+I looked into this bug with @ambv and @carljm, and we reached the
+conclusion was that it's not possible for the tokenizer to determine if
+async/await is a keyword inside all possible generators without breaking
+the grammar for older versions of Python.
+
+Instead, we introduce a new tokenizer mode for Python 3.7+ that will
+cause all async/await instances to get parsed as a reserved keyword,
+which should fix async/await inside generators.
+
+# Issue #593 - Black can't parse new Python 3.7 async generator syntax
+
+Operating system: Linux but unlikely to be OS specific
+Python version: 3.7.1
+Black version: 18.9b0
+Does also happen on master: Yes (as of 32eed7d)
+
+The following code (extracted from test_asyncgen.py in CPython) is currently not handled by black:
+
+def make_arange(n):
+    # This syntax is legal starting with Python 3.7
+    return (i * 2 for i in range(n) if await wrap(i))
+Running black on it results in:
+
+error: cannot format test_asyncgen.py: Cannot parse: 3:45:     return (i * 2 for i in range(n) if await wrap(i))
+All done! 💥 💔 💥
+1 file failed to reformat.
+As per the comment, this is new Python 3.7 syntax, so presumably "just" a case of needing to update the parser to reflect the grammar change.

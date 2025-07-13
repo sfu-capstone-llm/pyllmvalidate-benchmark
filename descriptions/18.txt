@@ -1,0 +1,9 @@
+# PR - Preserve line endings when formatting a file in place
+
+Fixes #258
+
+Note that this only changes behavior when black writes back to the file. In other cases like when using --diff or writing to stdout, I think it's reasonable to expect the caller to handle line endings.
+
+# Issue #258 - Line endings on Windows.
+
+Black outputs CRLF line endings on Windows even if the source file has Unix-style lines. It's possible to work around using for example Git configuration, but it would be nice if the behavior was configurable. Some of us like to keep Unix line endings even on Windows.

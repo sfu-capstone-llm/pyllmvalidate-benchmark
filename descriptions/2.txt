@@ -1,0 +1,46 @@
+# PR - Fix for "# fmt: on" with decorators
+
+Re-submitting #1324 using correct email.
+
+This is quick and likely dirty fix for #560. It is based on assumption that indentation has semantic meaning in Python so in case if # fmt: on exists in node children at the same column as opening # fmt: off we should process each child separately excluding only those before # fmt: on.
+
+This seems to work for my use case which is blocking black adoption in my team and doesn't break any tests but it would be great if someone with more experience in codebase could help to polish it because I dived into black source code only two hours ago.
+
+Thanks!
+
+# Issue #560 - "fmt: on" does not work when crossing block boundaries and decorators
+
+Operating system: Linux Mint 19.0
+Python version: 3.6.6
+Black version: 18.9b0
+Does also happen on master: yes
+
+Simplest reproducer: the following is left unchanged. In fact, it behaves as if # fmt: off is true until end of file.
+
+# fmt: off
+if (x and y):
+# fmt: on
+    pass
+
+if (x and y):
+    pass
+The soonest # fmt: on takes effect is at end of the indented if block.
+
+Ran into this with a series of decorators:
+
+# fmt: off
+@click.command()
+@click.option("-a", "--align",      help="aligned help texts")
+@click.option("-b", "--big-option", help="should stay aligned")
+# fmt: on
+def foo(align,    big_option):
+    pass
+Simple workaround for me is keep the formatter commands within a "block" - the following works perfectly fine:
+
+@click.command()
+# fmt: off
+@click.option("-a", "--align",      help="aligned help texts")
+@click.option("-b", "--big-option", help="should stay aligned")
+# fmt: on
+def foo(align, big_option):
+    pass
