@@ -1,0 +1,120 @@
+diff --git a/black.py b/black.py
+index dab3f00..6499b22 100644
+--- a/black.py
++++ b/black.py
+@@ -1439,23 +1469,24 @@ def split_line(
+     If `py36` is True, splitting may generate syntax that is only compatible
+     with Python 3.6 and later.
+     """
+-    if isinstance(line, UnformattedLines):
++    if isinstance(line, UnformattedLines):
+         yield line
+         return
+ 
+     line_str = str(line).strip('\n')
+-    if len(line_str) <= line_length and '\n' not in line_str:
++    if len(line_str) <= line_length and '\n' not in line_str:
+         yield line
+         return
+ 
++    split_funcs: List[SplitFunc]
+     if line.is_def:
+         split_funcs = [left_hand_split]
+     elif line.inside_brackets:
+-        split_funcs = [delimiter_split]
+-        if '\n' not in line_str:
+-            # Only attempt RHS if we don't have multiline strings or comments
+-            # on this line.
+-            split_funcs.append(right_hand_split)
++        split_funcs = [delimiter_split, standalone_comment_split, right_hand_split]
+     else:
+         split_funcs = [right_hand_split]
+     for split_func in split_funcs:
+@@ -1464,7 +1495,7 @@ def split_line(
+         # split altogether.
+         result: List[Line] = []
+         try:
+-            for l in split_func(line, py36=py36):
++            for l in split_func(line, py36):
+                 if str(l).strip('\n') == line_str:
+                     raise CannotSplit("Split function returned an unchanged result")
+ 
+@@ -1615,11 +1659,24 @@ def delimiter_split(line: Line, py36: bool = False) -> Iterator[Line]:
+     current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
+     lowest_depth = sys.maxsize
+     trailing_comma_safe = True
++
++    def append_to_line(leaf: Leaf) -> Iterator[Line]:
++        """Append `leaf` to current line or to new line if appending impossible."""
++        nonlocal current_line
++        try:
++            current_line.append_safe(leaf, preformatted=True)
++        except ValueError as ve:
++            yield current_line
++
++            current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
++            current_line.append(leaf)
++
+     for leaf in line.leaves:
+-        current_line.append(leaf, preformatted=True)
+-        comment_after = line.comments.get(id(leaf))
+-        if comment_after:
+-            current_line.append(comment_after, preformatted=True)
++        yield from append_to_line(leaf)
++
++        for comment_after in line.comments_after(leaf):
++            yield from append_to_line(comment_after)
++
+         lowest_depth = min(lowest_depth, leaf.bracket_depth)
+         if (
+             leaf.bracket_depth == lowest_depth
+@@ -1629,7 +1686,6 @@ def delimiter_split(line: Line, py36: bool = False) -> Iterator[Line]:
+             trailing_comma_safe = trailing_comma_safe and py36
+         leaf_priority = delimiters.get(id(leaf))
+         if leaf_priority == delimiter_priority:
+-            normalize_prefix(current_line.leaves[0], inside_brackets=True)
+             yield current_line
+ 
+             current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
+@@ -1640,7 +1696,40 @@ def delimiter_split(line: Line, py36: bool = False) -> Iterator[Line]:
+             and trailing_comma_safe
+         ):
+             current_line.append(Leaf(token.COMMA, ','))
+-        normalize_prefix(current_line.leaves[0], inside_brackets=True)
++        yield current_line
++
++
++@dont_increase_indentation
++def standalone_comment_split(line: Line, py36: bool = False) -> Iterator[Line]:
++    """Split standalone comments from the rest of the line."""
++    for leaf in line.leaves:
++        if leaf.type == STANDALONE_COMMENT:
++            if leaf.bracket_depth == 0:
++                break
++
++    else:
++        raise CannotSplit("Line does not have any standalone comments")
++
++    current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
++
++    def append_to_line(leaf: Leaf) -> Iterator[Line]:
++        """Append `leaf` to current line or to new line if appending impossible."""
++        nonlocal current_line
++        try:
++            current_line.append_safe(leaf, preformatted=True)
++        except ValueError as ve:
++            yield current_line
++
++            current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
++            current_line.append(leaf)
++
++    for leaf in line.leaves:
++        yield from append_to_line(leaf)
++
++        for comment_after in line.comments_after(leaf):
++            yield from append_to_line(comment_after)
++
++    if current_line:
+         yield current_line
+ 
+ 

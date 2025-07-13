@@ -131,7 +131,7 @@ class Driver(object):
                     current_line = ""
                     current_column = 0
                     wait_for_nl = False
-            elif char in ' \t':
+            elif char == ' ':
                 current_column += 1
             elif char == '\n':
                 # unexpected empty line

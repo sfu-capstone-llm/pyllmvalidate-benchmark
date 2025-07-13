@@ -7,11 +7,10 @@ index 72d9f47..6626c05 100644
                      current_column = 0
                      wait_for_nl = False
 -            elif char == ' ':
--                current_column += 1
++            elif char == ' ':
+                 current_column += 1
 -            elif char == '\t':
 -                current_column += 4
-+            elif char in ' \t':
-+                current_column += 1
              elif char == '\n':
                  # unexpected empty line
                  current_column = 0

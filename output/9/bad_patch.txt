@@ -7,17 +7,14 @@ index b727666..c44bc9b 100644
          return GRAMMARS
      elif all(not version.is_python2() for version in target_versions):
 -        # Python 2-compatible code, so don't try Python 3 grammar.
--        return [
--            pygram.python_grammar_no_print_statement_no_exec_statement,
--            pygram.python_grammar_no_print_statement,
--        ]
 +        # Python 3-compatible code, so don't try Python 2 grammar
-+        return [
-+            pygram.python_grammar_no_print_statement_no_exec_statement,
-+        ]
+         return [
+             pygram.python_grammar_no_print_statement_no_exec_statement,
+             pygram.python_grammar_no_print_statement,
+         ]
      else:
 -        return [pygram.python_grammar]
-+        return [pygram.python_grammar_no_print_statement, pygram.python_grammar]
++        return [pygram.python_grammar_no_print_statement]
  
  
  def lib2to3_parse(src_txt: str, target_versions: Iterable[TargetVersion] = ()) -> Node:

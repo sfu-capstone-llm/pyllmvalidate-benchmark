@@ -1,8 +1,10 @@
 import os
+import numbers
 import re
 import shlex
 import shutil
 import subprocess
+import argparse
 from pathlib import Path
 from typing import List, TypedDict, Dict, Tuple
 from dataclasses import dataclass
@@ -45,6 +47,7 @@ def get_files_from_patch(patch_content: str) -> List[str]:
 
 
 def main():
+    args = parse_args()
     # Create output directory if it doesn't exist
     base_output_dir = Path("output").resolve()  # Use absolute path
     base_output_dir.mkdir(exist_ok=True)
@@ -52,9 +55,16 @@ def main():
     bugs_dir = Path("/workspace/BugsInPy/projects/black/bugs")
     bugs_info = get_bug_info(bugs_dir)
 
+    single_run = -1
+    if args.single is not None:
+        if not (args.single >= "1" and args.single <= "23"):
+            raise Exception("arg --single must be between 1 and 23 (bug number)")
+        single_run = int(args.single)
+
     for info in bugs_info:
-        if info["bug_number"] != 6:
+        if single_run != -1 and info["bug_number"] != single_run:
             continue
+        print(f"=== Bug {info['bug_number']} ===")
         bug_output_dir = base_output_dir / str(info["bug_number"])
         base_install_dir = Path(
             "/workspace/BugsInPy/framework/bin/temp/black-" + str(info["bug_number"])
@@ -106,13 +116,18 @@ def main():
 
         output_bad_diff(bad_diff, bug_output_dir)
 
-        bad_patch_files = get_files_from_patch(bad_diff)
+        rel_path_files = get_files_from_patch(bad_diff)
         bad_proj_dir = bad_install_dir / "black"
-        for rel_path in bad_patch_files:
+        for rel_path in rel_path_files:
             original_file = bad_proj_dir / (rel_path + ".original")
             if not original_file.exists():
                 print(f"{original_file} doesn't exist... copying")
                 shutil.copy(bad_proj_dir / rel_path, original_file)
+
+        if args.re_apply_diff:
+            for rel_path in rel_path_files:
+                original_file = bad_proj_dir / (rel_path + ".original")
+                shutil.copy(original_file, bad_proj_dir / rel_path)
 
         # patch missing files
         patches = PATCHES.get(str(info["bug_number"]), [])
@@ -128,7 +143,7 @@ def main():
         bad_output_path = bug_output_dir / "bad"
         bad_output_path.mkdir(exist_ok=True)
 
-        for file in bad_patch_files:
+        for file in rel_path_files:
             src_file = bad_install_dir / "black" / file
             dest_file = bad_output_path / file.replace("/", "-")
             dest_file.parent.mkdir(parents=True, exist_ok=True)
@@ -140,29 +155,27 @@ def main():
             print(
                 f"Running tracer for bug {info['bug_number']} for bad_callgraph.txt..."
             )
-            try:
-                result = subprocess.run(
-                    [
-                        bad_config["python_path"],
-                        bad_config["tracer_script_path"],
-                        "--bug-number",
-                        str(info["bug_number"]),
-                        "--version",
-                        "bad",
-                    ]
-                    + info["args"],
-                    cwd=bad_config["temp_dir"] + "/black",
-                    env=bad_config["env"],
-                    text=True,
-                    capture_output=True,
-                    timeout=300,  # 5-minute timeout
-                )
-                print(f"Tracer STDERR: {result.stderr}")
-            except subprocess.TimeoutExpired as e:
-                print(f"ERROR: Tracer for bug {info['bug_number']} timed out.")
-                print(f"STDOUT: {e.stdout}")
-                print(f"STDERR: {e.stderr}")
-                print("Test failed...")
+            result = subprocess.run(
+                [
+                    bad_config["python_path"],
+                    bad_config["tracer_script_path"],
+                    "--bug-number",
+                    str(info["bug_number"]),
+                    "--version",
+                    "bad",
+                ]
+                + info["args"],
+                cwd=bad_config["temp_dir"] + "/black",
+                env=bad_config["env"],
+                text=True,
+            )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--re-apply-diff", action="store_true")
+    parser.add_argument("--single", action="store")
+    return parser.parse_args()
 
 
 def get_bad_diff(good_diff: str, bad_diff_path: str) -> str:
@@ -204,14 +217,14 @@ You will be given a correct diff that fixes a bug. Your job is to use the correc
 - Do not introduce or fix unrelated code
 - Ensure the hunk headers (`@@ -X,Y +Z,W @@`) remain accurate based on line count
 - Do not include any extra explanation, markdown, or comments—only output the raw diff
-- Some things you can do are remove statements, set default values, remove function calls, pick a mutation operator randomly and apply it
+- Some things you can do are remove statements, set default values, remove function calls, return empty array (pick a mutation operator randomly and apply it)
     """
     client = OpenAI(
         # base_url="http://host.docker.internal:1234/v1",
         api_key=OPENAI_API_KEY
     )
     res = client.responses.create(
-        model="gpt-4.1-mini",
+        model="gpt-4.1",
         input=[
             {"role": "developer", "content": system_prompt},
             {"role": "user", "content": good_diff},
@@ -281,7 +294,6 @@ def checkout_bug(path: str, bug_number: str, v: str):
 def install(folder_path: str):
     print("Installing dependencies...")
 
-    # Create minimal environment with just PATH and HOME
     minimal_env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "HOME": os.environ.get("HOME", ""),
@@ -301,17 +313,17 @@ def install(folder_path: str):
     except Exception as e:
         print(f"DEBUG: Could not check Python version: {e}")
 
-    print("DEBUG: Installing with minimal environment")
-
-    try:
-        subprocess.run(
-            ["/workspace/BugsInPy/framework/bin/bugsinpy-compile"],
-            cwd=folder_path,
-            env=minimal_env,
-            text=True,
+    res = subprocess.run(
+        ["/workspace/BugsInPy/framework/bin/bugsinpy-compile"],
+        cwd=folder_path,
+        env=minimal_env,
+        text=True,
+        capture_output=True,
+    )
+    if "This is not a checkout project folder" in res.stdout:
+        raise Exception(
+            f"unable to install {folder_path}. Try deleting the folder and rerunning the command"
         )
-    except Exception:
-        print("Maybe try deleting", folder_path)
 
 
 def get_bug_info(path: Path) -> List[BugInfo]:
@@ -404,7 +416,6 @@ def apply_patch(patch_path: Path, target_dir: Path):
 
         # Check if any hunks failed to apply
         if "Hunk #" in dry_run_result.stdout and "FAILED" in dry_run_result.stdout:
-            print(f"STDOUT: {dry_run_result.stdout}")
             print(f"STDERR: {dry_run_result.stderr}")
             raise Exception("Invalid patch: some hunks failed to apply")
         else:
