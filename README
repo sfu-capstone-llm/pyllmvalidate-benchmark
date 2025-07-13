@@ -1,0 +1,31 @@
+## How to run
+
+Go to a folder where you want to run the benchmarking:
+```bash
+mkdir benchmarking && cd benchmarking
+```
+
+Clone the BugsInPy repo:
+```bash
+git clone
+```
+
+Clone the benchmarking repo:
+```bash
+git clone
+```
+
+Clone the cli tool:
+```bash
+git clone
+```
+
+Run docker container:
+
+```bash
+docker run -it --rm -p 1234:1234 \
+  -v "$HOME/repos/BugsInPy:/workspace/BugsInPy" \
+  -v "$HOME/repos/pyllmvalidate-cli:/workspace/pyllmvalidate-cli" \
+  -v "$HOME/repos/pyllmvalidate-benchmark:/workspace/pyllmvalidate-benchmark" \
+  python38-uv
+```
