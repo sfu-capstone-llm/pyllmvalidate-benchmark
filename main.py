@@ -1,21 +1,26 @@
 import os
-import numbers
 import re
-import shlex
 import shutil
 import subprocess
 import argparse
 from pathlib import Path
 from typing import List, TypedDict, Dict, Tuple
 from dataclasses import dataclass
+from benchmark import benchmark
+from benchmark.evaluation import gen_confusion_matrix
 
 
-from dotenv import load_dotenv
-from openai import OpenAI
+from gen import create_bad_diff
+from bugsinpy.api import (
+    get_bug_info,
+    checkout_bug,
+    install_dependencies,
+    BugInfo,
+)
 
-load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KDY")
+PROJECT_NAME = "black"
+BUGSINPY_PATH = "/workspace/BugsInPy"
 
 
 BugInfo = TypedDict(
@@ -39,6 +44,18 @@ PATCHES = {
 }
 
 
+def main():
+    args = parse_args()
+
+    # Generate context in the output folder
+    if args.mode == "output-context":
+        gen_context(args)
+    elif args.mode == "run-tool":
+        benchmark()
+    elif args.mode == "evaluation":
+        gen_confusion_matrix()
+
+
 def get_files_from_patch(patch_content: str) -> List[str]:
     """Extracts file paths from a git diff patch."""
     # Matches lines like '--- a/src/black/__init__.py'
@@ -46,14 +63,12 @@ def get_files_from_patch(patch_content: str) -> List[str]:
     return re.findall(r"^\-\-\- a/(.+)$", patch_content, re.MULTILINE)
 
 
-def main():
-    args = parse_args()
+def gen_context(args):
     # Create output directory if it doesn't exist
     base_output_dir = Path("output").resolve()  # Use absolute path
     base_output_dir.mkdir(exist_ok=True)
 
-    bugs_dir = Path("/workspace/BugsInPy/projects/black/bugs")
-    bugs_info = get_bug_info(bugs_dir)
+    bugs_info = get_bug_info(PROJECT_NAME, BUGSINPY_PATH)
 
     single_run = -1
     if args.single is not None:
@@ -67,7 +82,7 @@ def main():
         print(f"=== Bug {info['bug_number']} ===")
         bug_output_dir = base_output_dir / str(info["bug_number"])
         base_install_dir = Path(
-            "/workspace/BugsInPy/framework/bin/temp/black-" + str(info["bug_number"])
+            BUGSINPY_PATH + "/framework/bin/temp/black-" + str(info["bug_number"])
         )
 
         good_install_dir = base_install_dir / "good"
@@ -83,38 +98,17 @@ def main():
             dest_file.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(src_file, dest_file)
 
-        output_good_diff(info["correct_patch"], bug_output_dir)
+        output_diff(info["correct_patch"], bug_output_dir, "good_patch.txt")
 
         # run on good
-        good_callgraph = Path(bug_output_dir / "good_callgraph.txt")
-        if not good_callgraph.exists() or len(good_callgraph.read_text()) == 0:
-            print(
-                f"Running tracer for bug {info['bug_number']} for good_callgraph.txt..."
-            )
-            result = subprocess.run(
-                [
-                    good_config["python_path"],
-                    good_config["tracer_script_path"],
-                    "--bug-number",
-                    str(info["bug_number"]),
-                    "--version",
-                    "good",
-                ]
-                + info["args"],
-                cwd=good_config["temp_dir"] + "/black",
-                env=good_config["env"],
-                text=True,
-            )
-
-            print(f"Call graph written to: {bug_output_dir}")
-            print(f"Return code: {result.returncode}")
+        run_tracer(info, good_config, "good", bug_output_dir)
 
         bad_install_dir = base_install_dir / "bad"
         bad_config = configure_and_setup(info, bad_install_dir, base_output_dir, False)
 
         bad_diff = get_bad_diff(info["correct_patch"], bug_output_dir / "bad_patch.txt")
 
-        output_bad_diff(bad_diff, bug_output_dir)
+        output_diff(bad_diff, bug_output_dir, "bad_patch.txt")
 
         rel_path_files = get_files_from_patch(bad_diff)
         bad_proj_dir = bad_install_dir / "black"
@@ -150,31 +144,42 @@ def main():
             shutil.copy(src_file, dest_file)
         print("DEBUG: Finished copying patched files.")
 
-        bad_callgraph = Path(bug_output_dir / "bad_callgraph.txt")
-        if not bad_callgraph.exists() or len(bad_callgraph.read_text()) == 0:
-            print(
-                f"Running tracer for bug {info['bug_number']} for bad_callgraph.txt..."
-            )
-            result = subprocess.run(
-                [
-                    bad_config["python_path"],
-                    bad_config["tracer_script_path"],
-                    "--bug-number",
-                    str(info["bug_number"]),
-                    "--version",
-                    "bad",
-                ]
-                + info["args"],
-                cwd=bad_config["temp_dir"] + "/black",
-                env=bad_config["env"],
-                text=True,
-            )
+        run_tracer(info, bad_config, "bad", bug_output_dir)
+
+
+def run_tracer(info: BugInfo, config: Dict, version: str, bug_output_dir: Path):
+    """Runs the tracer for a given version (good or bad)."""
+    callgraph_path = bug_output_dir / f"{version}_callgraph.txt"
+    if not callgraph_path.exists() or len(callgraph_path.read_text()) == 0:
+        print(
+            f"Running tracer for bug {info['bug_number']} for {version}_callgraph.txt..."
+        )
+        result = subprocess.run(
+            [
+                config["python_path"],
+                config["tracer_script_path"],
+                "--bug-number",
+                str(info["bug_number"]),
+                "--version",
+                version,
+            ]
+            + info["args"],
+            cwd=config["temp_dir"] + "/black",
+            env=config["env"],
+            text=True,
+        )
+
+        print(f"Call graph for {version} version written to: {callgraph_path}")
+        print(f"Return code: {result.returncode}")
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--re-apply-diff", action="store_true")
     parser.add_argument("--single", action="store")
+    parser.add_argument(
+        "--mode", required=True, choices=["output-context", "run-tool", "evaluation"]
+    )
     return parser.parse_args()
 
 
@@ -191,47 +196,9 @@ def get_bad_diff(good_diff: str, bad_diff_path: str) -> str:
     return bad_diff
 
 
-def output_good_diff(diff: str, output_dir: Path):
-    with open(output_dir / "good_patch.txt", "w") as f:
+def output_diff(diff: str, output_dir: Path, filename: str):
+    with open(output_dir / filename, "w") as f:
         f.write(diff)
-
-
-def output_bad_diff(diff: str, output_dir: Path):
-    with open(output_dir / "bad_patch.txt", "w") as f:
-        f.write(diff)
-
-
-def create_bad_diff(good_diff: str) -> str | None:
-    system_prompt = """
-# Identity
-
-You are a program that generates a buggy diff by mutating a correct diff. The diff can contain multiple files.
-You will be given a correct diff that fixes a bug. Your job is to use the correct diff as a reference to create a bad diff, but make it look like it might be correct.
-
-# Instructions
-
-- Output a valid diff in unified diff format (usable with `patch`)
-- Do NOT change metadata (headers, index lines, filenames, hunk positions)
-- Try to fool a human reviewer—your change should look plausible but be incorrect
-- The diff can contain multiple files so do not remove the headers for the other files
-- Do not introduce or fix unrelated code
-- Ensure the hunk headers (`@@ -X,Y +Z,W @@`) remain accurate based on line count
-- Do not include any extra explanation, markdown, or comments—only output the raw diff
-- Some things you can do are remove statements, set default values, remove function calls, return empty array (pick a mutation operator randomly and apply it)
-    """
-    client = OpenAI(
-        # base_url="http://host.docker.internal:1234/v1",
-        api_key=OPENAI_API_KEY
-    )
-    res = client.responses.create(
-        model="gpt-4.1",
-        input=[
-            {"role": "developer", "content": system_prompt},
-            {"role": "user", "content": good_diff},
-        ],
-        temperature=0.3,
-    )
-    return res.output_text
 
 
 def configure_and_setup(info, instal_dir: Path, output_dir: Path, isGood: bool):
@@ -239,22 +206,32 @@ def configure_and_setup(info, instal_dir: Path, output_dir: Path, isGood: bool):
     bug_output_dir = output_dir / str(info["bug_number"])
     create_output_folder(bug_output_dir)
 
-    if not os.path.exists(instal_dir / "black"):
+    project_dir_name = "black"
+
+    if not os.path.exists(instal_dir / project_dir_name):
         checkout_bug(
-            instal_dir.__str__(), str(info["bug_number"]), "1" if isGood else "0"
+            PROJECT_NAME,
+            BUGSINPY_PATH,
+            instal_dir.__str__(),
+            str(info["bug_number"]),
+            isGood,
         )
 
-    if not os.path.exists(instal_dir.__str__() + "/black/env/bin/python3"):
-        install(instal_dir.__str__() + "/black")
+    if not os.path.exists(
+        instal_dir.__str__() + f"/{project_dir_name}/env/bin/python3"
+    ):
+        install_dependencies(
+            BUGSINPY_PATH, instal_dir.__str__() + f"/{project_dir_name}"
+        )
 
     tracer_script_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "tracer.py"
     )
     python_path = os.path.join(
-        instal_dir, "black/env/bin/python3"
+        instal_dir, f"{project_dir_name}/env/bin/python3"
     )  # proj always clones to /black :(
 
-    black_project_dir = os.path.join(instal_dir, "black")
+    black_project_dir = os.path.join(instal_dir, project_dir_name)
 
     env = {
         "PYTHONPATH": black_project_dir,
@@ -270,122 +247,6 @@ def configure_and_setup(info, instal_dir: Path, output_dir: Path, isGood: bool):
 
 def create_output_folder(bug_output_dir: Path):
     bug_output_dir.mkdir(exist_ok=True)
-
-
-def checkout_bug(path: str, bug_number: str, v: str):
-    print(
-        f"Checking out bug {bug_number} ({'fixed' if v == '1' else 'buggy'} version)..."
-    )
-    subprocess.run(
-        [
-            "/workspace/BugsInPy/framework/bin/bugsinpy-checkout",
-            "-p",
-            "black",
-            "-i",
-            bug_number,
-            "-w",
-            path,
-            "-v",
-            v,  # 0 forbuggy version and 1 for fixed
-        ]
-    )
-
-
-def install(folder_path: str):
-    print("Installing dependencies...")
-
-    minimal_env = {
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
-        "HOME": os.environ.get("HOME", ""),
-    }
-
-    # Test what Python version will be used
-    try:
-        python_version_result = subprocess.run(
-            ["python3", "--version"],
-            env=minimal_env,
-            capture_output=True,
-            text=True,
-        )
-        print(
-            f"DEBUG: Python version that will be used: {python_version_result.stdout.strip()}"
-        )
-    except Exception as e:
-        print(f"DEBUG: Could not check Python version: {e}")
-
-    res = subprocess.run(
-        ["/workspace/BugsInPy/framework/bin/bugsinpy-compile"],
-        cwd=folder_path,
-        env=minimal_env,
-        text=True,
-        capture_output=True,
-    )
-    if "This is not a checkout project folder" in res.stdout:
-        raise Exception(
-            f"unable to install {folder_path}. Try deleting the folder and rerunning the command"
-        )
-
-
-def get_bug_info(path: Path) -> List[BugInfo]:
-    if not path.exists():
-        raise Exception("could not find path")
-
-    bugs_info = []
-
-    bug_folders = []
-    for item in path.iterdir():
-        if item.is_dir() and item.name.isdigit():
-            bug_folders.append(item)
-
-    bug_folders.sort(key=lambda x: int(x.name))
-
-    for bug_folder in bug_folders:
-        try:
-            bug_data = process_bug_folder(bug_folder)
-            bugs_info.append(bug_data)
-        except Exception as e:
-            print(f"Error processing {bug_folder}: {e}")
-
-    return bugs_info
-
-
-def extract_unittest_args(run_test_content: str) -> List[str]:
-    """Extract unittest arguments from run_test.sh content"""
-    try:
-        cmd = run_test_content.strip().split("|")[0].split(">")[0].strip()
-        tokens = shlex.split(cmd)
-
-        if "unittest" in tokens:
-            unittest_idx = tokens.index("unittest")
-            return tokens[unittest_idx:]
-        else:
-            if len(tokens) >= 3 and tokens[0] == "python" and tokens[1] == "-m":
-                return tokens[2:]
-            return tokens
-    except:
-        return []
-
-
-def process_bug_folder(bug_path: Path) -> BugInfo:
-    bug_number = int(bug_path.name)
-
-    # Read bug_patch.txt
-    patch_file = bug_path / "bug_patch.txt"
-    if patch_file.exists():
-        with open(patch_file, "r", encoding="utf-8") as f:
-            diff = f.read()
-    else:
-        diff = ""
-
-    test_file = bug_path / "run_test.sh"
-    if test_file.exists():
-        with open(test_file, "r", encoding="utf-8") as f:
-            test_content = f.readline().strip()
-        args = extract_unittest_args(test_content)
-    else:
-        args = []
-
-    return BugInfo(bug_number=bug_number, correct_patch=diff, args=args)
 
 
 def apply_patch(patch_path: Path, target_dir: Path):
