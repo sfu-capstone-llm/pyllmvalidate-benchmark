@@ -549,10 +549,10 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "gitpython", specifier = ">=3.1.40" },
-    { name = "matplotlib", specifier = ">=3.9.0" },
+    { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "openai", specifier = ">=1.93.0" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
-    { name = "scikit-learn", specifier = ">=1.5.0" },
+    { name = "scikit-learn", specifier = ">=1.7.0" },
 ]
 
 [[package]]

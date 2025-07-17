@@ -51,9 +51,11 @@ def main():
     if args.mode == "output-context":
         gen_context(args)
     elif args.mode == "run-tool":
-        benchmark()
+        output_dir = args.output if args.output is not None else "run-tool-output"
+        benchmark(output_dir)
     elif args.mode == "evaluation":
-        gen_confusion_matrix()
+        output_dir = args.output if args.output is not None else "evaluation-data"
+        gen_confusion_matrix(output_dir)
 
 
 def get_files_from_patch(patch_content: str) -> List[str]:
@@ -179,6 +181,10 @@ def parse_args():
     parser.add_argument("--single", action="store")
     parser.add_argument(
         "--mode", required=True, choices=["output-context", "run-tool", "evaluation"]
+    )
+    parser.add_argument(
+        "--output",
+        help="Directory to store run tool output",
     )
     return parser.parse_args()
 

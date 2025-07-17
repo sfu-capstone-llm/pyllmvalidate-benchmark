@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KDY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 
 def create_bad_diff(good_diff: str) -> str | None:
