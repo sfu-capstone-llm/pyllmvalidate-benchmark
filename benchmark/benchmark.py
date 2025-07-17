@@ -73,7 +73,7 @@ def benchmark(output_dir: str):
             print(result.stdout)
             print(result.stderr)
             raise Exception(
-                "There was a problem with the openai call. Did you include the OPEN_API_key in the .env"
+                "There was a problem with the openai call. Did you include the OPENAI_API_KEY in the .env"
             )
 
         stdout_file_path = output_path / f"{bug_data.bug_id}-{ver_str}-stdout.txt"
