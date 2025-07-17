@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
 
-def gen_confusion_matrix(output_dir_str: str):
+def gen_confusion_matrix(output_dir_str: str, run_tool_output_dir_str: str):
     """
     Generates a confusion matrix from the data in 'run-tool-output/confusion-matrx.json'
     and saves it as a PNG image in the specified output directory.
     """
-    confusion_matrix_path = Path("run-tool-output/confusion-matrx.json")
+    confusion_matrix_path = Path(run_tool_output_dir_str) / "confusion-matrx.json"
     output_dir = Path(output_dir_str)
     output_dir.mkdir(exist_ok=True)
 
