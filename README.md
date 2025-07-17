@@ -44,7 +44,7 @@ This tool has 3 different modes specified with the --mode flag:
 2. run-tool
 3. evaluation
 
-Note: Mode #1 is not fully automated because the LLM may generate an invalid diff. Running sometimes fixes it or you can fix the diff manually. Mode #1 and #2 requires an OPENAI_API_KEY.
+Note: Mode #1 is not fully automated because the LLM may generate an invalid diff. Running the command again sometimes fixes it or you can fix the diff manually. Mode #1 and #2 requires an OPENAI_API_KEY.
 
 ### Mode 1: Output Context
 
