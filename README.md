@@ -82,4 +82,6 @@ To run:
 uv run main.py --mode evaluation
 ```
 
-You can optionally specify the output folder with --output flag if you want to override the default location of pyllmvalidate-benchmark/evaluation-data
+You can optionally specify the output folder with --output flag if you want to override the default location of pyllmvalidate-benchmark/evaluation-data.
+
+If you use a custom location for run-tool then you must specify that location with the --run-tool-output-dir flag.
