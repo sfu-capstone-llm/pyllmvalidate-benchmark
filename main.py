@@ -15,6 +15,7 @@ from bugsinpy.api import (
     get_bug_info,
     checkout_bug,
     install_dependencies,
+    coverage,
     BugInfo,
 )
 
@@ -105,6 +106,12 @@ def gen_context(args):
         # run on good
         run_tracer(info, good_config, "good", bug_output_dir)
 
+        # Extract coverage for good version
+        good_coverage = coverage(Path(BUGSINPY_PATH), good_install_dir / "black")
+        good_coverage_path = bug_output_dir / "good_coverage.txt"
+        with open(good_coverage_path, "w") as f:
+            f.write(good_coverage)
+
         bad_install_dir = base_install_dir / "bad"
         bad_config = configure_and_setup(info, bad_install_dir, base_output_dir, False)
 
@@ -147,6 +154,12 @@ def gen_context(args):
         print("DEBUG: Finished copying patched files.")
 
         run_tracer(info, bad_config, "bad", bug_output_dir)
+
+        # Extract coverage for bad version
+        bad_coverage = coverage(Path(BUGSINPY_PATH), bad_install_dir / "black")
+        bad_coverage_path = bug_output_dir / "bad_coverage.txt"
+        with open(bad_coverage_path, "w") as f:
+            f.write(bad_coverage)
 
 
 def run_tracer(info: BugInfo, config: Dict, version: str, bug_output_dir: Path):

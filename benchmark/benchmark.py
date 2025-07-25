@@ -25,6 +25,7 @@ class BugData:
     callgraph: str
     diff: str
     description: str
+    coverage: str
     files: List[FileData]
 
     def __str__(self):
@@ -43,6 +44,10 @@ class BugData:
 # Method Trace
 
 {self.callgraph}
+
+# Coverage
+
+{self.coverage}
 
 # Files
 
@@ -126,6 +131,10 @@ def get_bug_data(
     diff = (bug_dir / f"{ver}_patch.txt").read_text()
     description = bug_description_path.read_text()
 
+    # Read coverage file
+    coverage_path = bug_dir / f"{ver}_coverage.txt"
+    coverage = coverage_path.read_text()
+
     files: List[FileData] = []
     for path in (bug_dir / ver).iterdir():
         content = path.read_text()
@@ -137,6 +146,7 @@ def get_bug_data(
         callgraph=callgraph,
         diff=diff,
         description=description,
+        coverage=coverage,
         files=files,
     )
 

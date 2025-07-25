@@ -3,6 +3,7 @@ import shlex
 import subprocess
 from pathlib import Path
 from typing import List, TypedDict
+import re
 
 
 BugInfo = TypedDict(
@@ -125,3 +126,23 @@ def install_dependencies(bugsinpy_path: str, folder_path: str):
         raise Exception(
             f"unable to install {folder_path}. Try deleting the folder and rerunning the command"
         )
+
+
+COVERAGE_TABLE_RE = re.compile(
+    r"(Name\s+Stmts\s+Miss\s+Cover\s+Missing\n[-]+\n.*?\n[-]+\nTOTAL\s+.*)",
+    re.DOTALL,
+)
+
+
+def coverage(bugsinpy_path: Path, work_dir: Path) -> str:
+    res = subprocess.run(
+        bugsinpy_path / "framework/bin/bugsinpy-coverage",
+        cwd=work_dir,
+        text=True,
+        capture_output=True,
+    )
+    # print(res.stderr)
+    match = COVERAGE_TABLE_RE.search(res.stdout)
+    if not match:
+        raise ValueError("Coverage table not found")
+    return match.group(1)
