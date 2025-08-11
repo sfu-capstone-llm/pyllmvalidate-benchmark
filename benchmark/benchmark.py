@@ -40,18 +40,6 @@ class BugData:
 # Diff
 
 {self.diff}
-
-# Method Trace
-
-{self.callgraph}
-
-# Coverage
-
-{self.coverage}
-
-# Files
-
-{file_strs}
 """
 
 
