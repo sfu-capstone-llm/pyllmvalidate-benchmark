@@ -85,3 +85,17 @@ uv run main.py --mode evaluation
 You can optionally specify the output folder with --output flag if you want to override the default location of pyllmvalidate-benchmark/evaluation-data.
 
 If you use a custom location for run-tool then you must specify that location with the --run-tool-output-dir flag.
+
+### Example of running the tool and generating the confusion matrix (step 2 and 3)
+
+Step 2:
+
+```bash
+uv run main.py --mode run-tool --output run-tool-sonnet-with-des-diff-method-coverage-files
+```
+
+Step 3:
+
+```bash
+uv run main.py --mode evaluation --output evaluation-data-sonnet-with-des-diff-method-coverage-files --run-tool-output-dir run-tool-sonnet-with-des-diff-method-coverage-files
+```
