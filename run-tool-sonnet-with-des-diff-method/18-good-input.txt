@@ -1,0 +1,321 @@
+
+# Description
+
+# PR - Preserve line endings when formatting a file in place
+
+Fixes #258
+
+Note that this only changes behavior when black writes back to the file. In other cases like when using --diff or writing to stdout, I think it's reasonable to expect the caller to handle line endings.
+
+# Issue #258 - Line endings on Windows.
+
+Black outputs CRLF line endings on Windows even if the source file has Unix-style lines. It's possible to work around using for example Git configuration, but it would be nice if the behavior was configurable. Some of us like to keep Unix line endings even on Windows.
+
+# Diff
+
+diff --git a/black.py b/black.py
+index e59a1e5..36e49b0 100644
+--- a/black.py
++++ b/black.py
+@@ -4,6 +4,7 @@ from asyncio.base_events import BaseEventLoop
+ from concurrent.futures import Executor, ProcessPoolExecutor
+ from enum import Enum, Flag
+ from functools import partial, wraps
++import io
+ import keyword
+ import logging
+ from multiprocessing import Manager
+@@ -465,8 +466,9 @@ def format_file_in_place(
+     """
+     if src.suffix == ".pyi":
+         mode |= FileMode.PYI
+-    with tokenize.open(src) as src_buffer:
+-        src_contents = src_buffer.read()
++
++    with open(src, "rb") as buf:
++        newline, encoding, src_contents = prepare_input(buf.read())
+     try:
+         dst_contents = format_file_contents(
+             src_contents, line_length=line_length, fast=fast, mode=mode
+@@ -475,7 +477,7 @@ def format_file_in_place(
+         return False
+ 
+     if write_back == write_back.YES:
+-        with open(src, "w", encoding=src_buffer.encoding) as f:
++        with open(src, "w", encoding=encoding, newline=newline) as f:
+             f.write(dst_contents)
+     elif write_back == write_back.DIFF:
+         src_name = f"{src}  (original)"
+@@ -484,7 +486,14 @@ def format_file_in_place(
+         if lock:
+             lock.acquire()
+         try:
+-            sys.stdout.write(diff_contents)
++            f = io.TextIOWrapper(
++                sys.stdout.buffer,
++                encoding=encoding,
++                newline=newline,
++                write_through=True,
++            )
++            f.write(diff_contents)
++            f.detach()
+         finally:
+             if lock:
+                 lock.release()
+@@ -503,7 +512,7 @@ def format_stdin_to_stdout(
+     `line_length`, `fast`, `is_pyi`, and `force_py36` arguments are passed to
+     :func:`format_file_contents`.
+     """
+-    src = sys.stdin.read()
++    newline, encoding, src = prepare_input(sys.stdin.buffer.read())
+     dst = src
+     try:
+         dst = format_file_contents(src, line_length=line_length, fast=fast, mode=mode)
+@@ -514,11 +523,25 @@ def format_stdin_to_stdout(
+ 
+     finally:
+         if write_back == WriteBack.YES:
+-            sys.stdout.write(dst)
++            f = io.TextIOWrapper(
++                sys.stdout.buffer,
++                encoding=encoding,
++                newline=newline,
++                write_through=True,
++            )
++            f.write(dst)
++            f.detach()
+         elif write_back == WriteBack.DIFF:
+             src_name = "<stdin>  (original)"
+             dst_name = "<stdin>  (formatted)"
+-            sys.stdout.write(diff(src, dst, src_name, dst_name))
++            f = io.TextIOWrapper(
++                sys.stdout.buffer,
++                encoding=encoding,
++                newline=newline,
++                write_through=True,
++            )
++            f.write(diff(src, dst, src_name, dst_name))
++            f.detach()
+ 
+ 
+ def format_file_contents(
+@@ -579,6 +602,19 @@ def format_str(
+     return dst_contents
+ 
+ 
++def prepare_input(src: bytes) -> Tuple[str, str, str]:
++    """Analyze `src` and return a tuple of (newline, encoding, decoded_contents)
++
++    Where `newline` is either CRLF or LF, and `decoded_contents` is decoded with
++    universal newlines (i.e. only LF).
++    """
++    srcbuf = io.BytesIO(src)
++    encoding, lines = tokenize.detect_encoding(srcbuf.readline)
++    newline = "\r\n" if b"\r\n" == lines[0][-2:] else "\n"
++    srcbuf.seek(0)
++    return newline, encoding, io.TextIOWrapper(srcbuf, encoding).read()
++
++
+ GRAMMARS = [
+     pygram.python_grammar_no_print_statement_no_exec_statement,
+     pygram.python_grammar_no_print_statement,
+@@ -590,8 +626,7 @@ def lib2to3_parse(src_txt: str) -> Node:
+     """Given a string with source, return the lib2to3 Node."""
+     grammar = pygram.python_grammar_no_print_statement
+     if src_txt[-1] != "\n":
+-        nl = "\r\n" if "\r\n" in src_txt[:1024] else "\n"
+-        src_txt += nl
++        src_txt += "\n"
+     for grammar in GRAMMARS:
+         drv = driver.Driver(grammar, pytree.convert)
+         try:
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->functools.update_wrapper
+black.dont_increase_indentation->functools.wraps
+black.dont_increase_indentation->typing.inner
+black.format_file_in_place->pathlib.suffix
+black.format_file_in_place->codecs.__init__
+black.format_file_in_place->pathlib.__fspath__
+black.format_file_in_place->black.format_file_contents
+black.format_file_in_place->black.prepare_input
+black.prepare_input->codecs.decode
+black.prepare_input->tokenize.detect_encoding
+black.prepare_input->codecs.__init__
+black.format_file_contents->black.format_str
+black.format_str->black.maybe_empty_lines
+black.format_str->black.__str__
+black.format_str->enum.__bool__
+black.format_str->typing.__new__
+black.format_str->black.is_python36
+black.format_str->black.visit
+black.format_str->black.split_line
+black.format_str->enum.__and__
+black.format_str->.__init__
+black.format_str->black.lib2to3_parse
+black.format_str->black.get_future_imports
+black.lib2to3_parse->blib2to3.pgen2.driver.__init__
+black.lib2to3_parse->blib2to3.pgen2.tokenize.generate_tokens
+black.lib2to3_parse->blib2to3.pgen2.driver.parse_string
+blib2to3.pgen2.driver.__init__->logging.getLogger
+blib2to3.pgen2.driver.parse_string->blib2to3.pgen2.driver.parse_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.driver._partially_consume_prefix
+blib2to3.pgen2.driver.parse_tokens->logging.debug
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.setup
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.addtoken
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.__init__
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.classify
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.shift
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.push
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.pop
+blib2to3.pgen2.parse.shift->blib2to3.pytree.convert
+blib2to3.pytree.convert->blib2to3.pytree.__new__
+blib2to3.pytree.convert->blib2to3.pytree.__init__
+blib2to3.pgen2.parse.pop->blib2to3.pytree.convert
+black.is_python36->blib2to3.pytree.pre_order
+blib2to3.pytree.pre_order->blib2to3.pytree.pre_order
+black.visit->black.visit_DEDENT
+black.visit->black.visit_suite
+black.visit->black.visit_INDENT
+black.visit->black.visit
+black.visit->black.visit_simple_stmt
+black.visit->blib2to3.pytree.type_repr
+black.visit->black.visit_ENDMARKER
+black.visit->black.visit_default
+black.visit->black.visit_stmt
+blib2to3.pytree.type_repr->importlib._bootstrap.parent
+black.visit_default->black.generate_comments
+black.visit_default->black.visit
+black.visit_default->black.any_open_brackets
+black.visit_default->black.normalize_prefix
+black.visit_default->black.append
+black.visit_default->black.visit_default
+black.visit_stmt->black.line
+black.visit_stmt->black.normalize_invisible_parens
+black.visit_stmt->black.visit
+black.normalize_invisible_parens->black.generate_comments
+black.generate_comments->blib2to3.pytree.prefix
+blib2to3.pytree.prefix->blib2to3.pytree.changed
+blib2to3.pytree.prefix->blib2to3.pytree.prefix
+black.line->.__init__
+black.line->black.__bool__
+black.normalize_prefix->blib2to3.pytree.prefix
+blib2to3.pytree.changed->blib2to3.pytree.changed
+black.append->blib2to3.pytree.prefix
+black.append->black.whitespace
+black.append->black.append_comment
+black.append->black.maybe_remove_trailing_comma
+black.append->black.mark
+black.append->black.is_class_paren_empty
+black.append->black.is_complex_subscript
+black.mark->black.is_split_before_delimiter
+black.mark->black.maybe_decrement_after_for_loop_variable
+black.mark->black.maybe_increment_for_loop_variable
+black.mark->black.maybe_decrement_after_lambda_arguments
+black.mark->black.maybe_increment_lambda_arguments
+black.mark->black.is_split_after_delimiter
+black.is_split_before_delimiter->black.is_vararg
+black.is_complex_subscript->black.get_open_lsqb
+black.whitespace->blib2to3.pytree.prev_sibling
+black.whitespace->black.preceding_leaf
+black.preceding_leaf->blib2to3.pytree.prev_sibling
+black.is_class_paren_empty->black.__bool__
+black.is_class_paren_empty->black.is_class
+black.is_class->black.__bool__
+black.visit_suite->black.visit_default
+black.visit_INDENT->black.line
+black.visit_INDENT->black.visit_default
+black.maybe_empty_lines->black._maybe_empty_lines
+black._maybe_empty_lines->blib2to3.pytree.prefix
+black._maybe_empty_lines->black.is_class
+black._maybe_empty_lines->black.is_decorator
+black._maybe_empty_lines->black.__bool__
+black._maybe_empty_lines->black.is_import
+black._maybe_empty_lines->black.is_def
+black.is_decorator->black.__bool__
+black.split_line->black.__str__
+black.split_line->black.is_comment
+black.split_line->black.is_line_short_enough
+black.__str__->blib2to3.pytree.prefix
+black.__str__->black.__bool__
+black.__str__->blib2to3.pytree.__unicode__
+blib2to3.pytree.__unicode__->blib2to3.pytree.prefix
+black.is_line_short_enough->black.contains_standalone_comments
+black.visit_simple_stmt->black.line
+black.visit_simple_stmt->black.visit_default
+black.visit_DEDENT->black.line
+black.visit_DEDENT->black.visit_default
+black.is_import->black.is_import
+black.is_import->black.__bool__
+black.visit_ENDMARKER->black.line
+black.visit_ENDMARKER->black.visit_default

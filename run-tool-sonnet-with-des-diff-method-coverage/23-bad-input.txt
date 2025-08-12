@@ -1,0 +1,361 @@
+
+# Description
+
+# PR
+
+Automatic detection of deprecated Python 2 forms of print and exec
+Note: if those are handled, you can't use --safe because this check is using
+Python 3.6+ builtin AST.
+
+Fixes #49
+
+# Issue #49 - Space before method brackets for built-in functions
+
+I have the problem that black does a reformat of built-in functions, in my case on exec and eval as those have been statements in Python 2 but are methods in Python 3.
+
+-        return exec("code", {}, {})
++        return exec ("code", {}, {})
+Operating system: MacOS
+Python version: 3.6.4
+Black version: black, version 18.3a3
+Does also happen on master: Yes
+
+
+
+# Diff
+
+diff --git a/black.py b/black.py
+index bb8ec2e..d7c8e0a 100644
+--- a/black.py
++++ b/black.py
+@@ -235,23 +235,36 @@ def format_str(src_contents: str, line_length: int) -> FileContent:
+     return dst_contents
+ 
+ 
++GRAMMARS = [
++    pygram.python_grammar_no_print_statement_no_exec_statement,
++    pygram.python_grammar_no_print_statement,
++    pygram.python_grammar_no_exec_statement,
++    pygram.python_grammar,
++]
++
++
+ def lib2to3_parse(src_txt: str) -> Node:
+     """Given a string with source, return the lib2to3 Node."""
+     grammar = pygram.python_grammar_no_print_statement
+-    drv = driver.Driver(grammar, pytree.convert)
+     if src_txt[-1] != '\n':
+         nl = '\r\n' if '\r\n' in src_txt[:1024] else '\n'
+         src_txt += nl
+-    try:
+-        result = drv.parse_string(src_txt, True)
+-    except ParseError as pe:
+-        lineno, column = pe.context[1]
+-        lines = src_txt.splitlines()
++    for grammar in GRAMMARS:
++        drv = driver.Driver(grammar, pytree.convert)
+         try:
+-            faulty_line = lines[lineno - 1]
+-        except IndexError:
+-            faulty_line = "<line number missing in source>"
+-        raise ValueError(f"Cannot parse: {lineno}:{column}: {faulty_line}") from None
++            result = drv.parse_string(src_txt, True)
++            break
++
++        except ParseError as pe:
++            lineno, column = pe.context[1]
++            lines = src_txt.splitlines()
++            try:
++                faulty_line = lines[lineno - 1]
++            except IndexError:
++                faulty_line = "<line number missing in source>"
++            exc = ValueError(f"Cannot parse: {lineno}:{column}: {faulty_line}")
++            continue
++    else:
++        raise exc from None
+ 
+     if isinstance(result, Leaf):
+         result = Node(syms.file_input, [result])
+@@ -903,6 +916,17 @@ def whitespace(leaf: Leaf) -> str:  # noqa C901
+         ):
+             return NO
+ 
++        elif (
++            prevp.type == token.RIGHTSHIFT
++            and prevp.parent
++            and prevp.parent.type == syms.shift_expr
++            and prevp.prev_sibling
++            and prevp.prev_sibling.type == token.NAME
++            and prevp.prev_sibling.value == 'print'
++        ):
++            # Python 2 print chevron
++            return NO
++
+     elif prev.type in OPENING_BRACKETS:
+         return NO
+ 
+@@ -1538,7 +1562,12 @@ def assert_equivalent(src: str, dst: str) -> None:
+     try:
+         src_ast = ast.parse(src)
+     except Exception as exc:
+-        raise AssertionError(f"cannot parse source: {exc}") from None
++        raise AssertionError(f"cannot parse source: {exc}") from None
+ 
+     try:
+         dst_ast = ast.parse(dst)
+diff --git a/blib2to3/pygram.py b/blib2to3/pygram.py
+index c4ff9d1..bf55ab4 100644
+--- a/blib2to3/pygram.py
++++ b/blib2to3/pygram.py
+@@ -36,5 +36,12 @@ python_symbols = Symbols(python_grammar)
+ python_grammar_no_print_statement = python_grammar.copy()
+ del python_grammar_no_print_statement.keywords["print"]
+ 
++python_grammar_no_exec_statement = python_grammar.copy()
++del python_grammar_no_exec_statement.keywords["exec"]
++
++python_grammar_no_print_statement_no_exec_statement = python_grammar.copy()
++del python_grammar_no_print_statement_no_exec_statement.keywords["print"]
++del python_grammar_no_print_statement_no_exec_statement.keywords["exec"]
++
+ pattern_grammar = driver.load_packaged_grammar("blib2to3", _PATTERN_GRAMMAR_FILE)
+ pattern_symbols = Symbols(pattern_grammar)
+diff --git a/tests/function.py b/tests/function.py
+index 7fa6866..888ef9f 100644
+--- a/tests/function.py
++++ b/tests/function.py
+@@ -14,8 +14,9 @@ def func_no_args():
+   for i in range(10):
+     print(i)
+     continue
++  exec("new-style exec", {}, {})
+   return None
+-async def coroutine(arg):
++async def coroutine(arg, exec=False):
+  "Single-line docstring. Multiline is harder to reformat."
+  async with some_connection() as conn:
+      await conn.do_what_i_mean('SELECT bobby, tables FROM xkcd', timeout=2)
+@@ -93,10 +94,11 @@ def func_no_args():
+         print(i)
+         continue
+ 
++    exec("new-style exec", {}, {})
+     return None
+ 
+ 
+-async def coroutine(arg):
++async def coroutine(arg, exec=False):
+     "Single-line docstring. Multiline is harder to reformat."
+     async with some_connection() as conn:
+         await conn.do_what_i_mean('SELECT bobby, tables FROM xkcd', timeout=2)
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.dump->blib2to3.pgen2.grammar._make_deterministic
+blib2to3.pgen2.grammar._make_deterministic->blib2to3.pgen2.grammar.<listcomp>
+blib2to3.pgen2.grammar._make_deterministic->blib2to3.pgen2.grammar.<genexpr>
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.format_str->.__init__
+black.format_str->typing.__new__
+black.format_str->black.__str__
+black.format_str->black.visit
+black.format_str->black.split_line
+black.format_str->black.lib2to3_parse
+black.format_str->black.maybe_empty_lines
+black.format_str->black.is_python36
+black.lib2to3_parse->blib2to3.pgen2.tokenize.generate_tokens
+black.lib2to3_parse->blib2to3.pgen2.driver.__init__
+black.lib2to3_parse->blib2to3.pgen2.driver.parse_string
+blib2to3.pgen2.driver.__init__->logging.getLogger
+blib2to3.pgen2.driver.parse_string->blib2to3.pgen2.driver.parse_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.parse_tokens->logging.debug
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.__init__
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.addtoken
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.setup
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.classify
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.push
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.shift
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.pop
+blib2to3.pgen2.parse.shift->blib2to3.pytree.convert
+blib2to3.pytree.convert->blib2to3.pytree.__new__
+blib2to3.pytree.convert->blib2to3.pytree.__init__
+blib2to3.pgen2.parse.pop->blib2to3.pytree.convert
+black.is_python36->blib2to3.pytree.pre_order
+blib2to3.pytree.pre_order->blib2to3.pytree.pre_order
+black.visit->black.visit_INDENT
+black.visit->black.visit_simple_stmt
+black.visit->blib2to3.pytree.type_repr
+black.visit->black.visit_stmt
+black.visit->black.visit_default
+black.visit->black.visit_DEDENT
+black.visit->black.visit_ENDMARKER
+blib2to3.pytree.type_repr->importlib._bootstrap.parent
+black.visit_default->black.normalize_prefix
+black.visit_default->black.any_open_brackets
+black.visit_default->black.visit
+black.visit_default->black.line
+black.visit_default->blib2to3.pytree.type_repr
+black.visit_default->black.append
+black.visit_default->black.generate_comments
+black.visit_default->blib2to3.pytree.prefix
+black.visit_default->click.termui.secho
+black.visit_default->black.visit_default
+black.visit_simple_stmt->black.visit_default
+black.visit_simple_stmt->black.line
+black.line->black.__bool__
+black.line->.__init__
+black.generate_comments->blib2to3.pytree.__new__
+black.generate_comments->blib2to3.pytree.prefix
+black.generate_comments->black.make_comment
+black.generate_comments->blib2to3.pytree.__init__
+black.append->black.maybe_decrement_after_for_loop_variable
+black.append->black.maybe_adapt_standalone_comment
+black.append->black.whitespace
+black.append->black.mark
+black.append->black.append_comment
+black.append->blib2to3.pytree.prefix
+black.append->black.maybe_remove_trailing_comma
+black.append->black.maybe_increment_for_loop_variable
+black.append_comment->blib2to3.pytree.prefix
+black.append_comment->black.last_non_delimiter
+blib2to3.pytree.prefix->blib2to3.pytree.changed
+black.maybe_empty_lines->black._maybe_empty_lines
+black._maybe_empty_lines->black.is_yield
+black._maybe_empty_lines->black.__bool__
+black._maybe_empty_lines->black.is_class
+black._maybe_empty_lines->black.is_flow_control
+black._maybe_empty_lines->blib2to3.pytree.prefix
+black._maybe_empty_lines->black.is_def
+black._maybe_empty_lines->black.is_import
+black._maybe_empty_lines->black.is_comment
+black._maybe_empty_lines->black.is_decorator
+black.is_comment->black.__bool__
+black.is_decorator->black.__bool__
+black.is_class->black.__bool__
+black.is_flow_control->black.__bool__
+black.split_line->black.__str__
+black.__str__->black.__bool__
+black.__str__->blib2to3.pytree.__unicode__
+black.__str__->blib2to3.pytree.prefix
+black.normalize_prefix->blib2to3.pytree.prefix
+blib2to3.pytree.changed->blib2to3.pytree.changed
+black.mark->black.is_delimiter
+black.whitespace->blib2to3.pytree.prev_sibling
+black.whitespace->black.preceding_leaf
+black.is_import->black.__bool__
+black.is_import->black.is_import
+black.is_yield->black.__bool__
+blib2to3.pytree.__unicode__->blib2to3.pytree.prefix
+black.preceding_leaf->blib2to3.pytree.prev_sibling
+black.visit_stmt->black.line
+black.visit_stmt->black.visit
+black.visit_INDENT->black.visit_default
+black.visit_INDENT->black.line
+black.visit_DEDENT->black.line
+black.visit_ENDMARKER->black.visit_default
+black.visit_ENDMARKER->black.line
+
+# Coverage
+
+Name                                                    Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------------------------
+black.py                                                  930    463    50%   87-129, 140-162, 169-181, 188-198, 205-215, 229, 243-244, 247-254, 257, 263-264, 379, 386, 393, 399, 414, 442, 472-473, 513-551, 560-563, 570-572, 591-593, 607-611, 615-617, 632, 676, 687, 691, 695, 699, 714, 750, 758-761, 791-793, 800-811, 814-816, 819, 859, 872, 875-882, 885-893, 896-897, 904, 907, 912, 919-923, 927-940, 944-947, 960-961, 968-977, 981, 984-989, 992-996, 1000-1008, 1013, 1021-1022, 1026-1030, 1034-1050, 1053-1062, 1065, 1078-1082, 1085, 1097, 1146, 1155, 1160, 1182-1213, 1222-1257, 1262-1297, 1301-1307, 1320-1360, 1406, 1413-1415, 1427-1435, 1448-1454, 1458-1459, 1466-1472, 1479-1501, 1510-1557, 1570-1576, 1586-1594, 1599-1603, 1609
+blib2to3/__init__.py                                        0      0   100%
+blib2to3/pgen2/__init__.py                                  1      0   100%
+blib2to3/pgen2/driver.py                                  118     31    74%   54-56, 88, 94-95, 99, 103-104, 126-133, 143, 145, 162-166, 174-180, 183
+blib2to3/pgen2/grammar.py                                  60     23    62%   101-103, 113, 130-141, 145-152
+blib2to3/pgen2/parse.py                                    81      8    90%   20-25, 155-159, 172
+blib2to3/pgen2/pgen.py                                    297    265    11%   13-25, 28-50, 53-59, 63-105, 108-112, 116-143, 146-167, 174-203, 206-219, 222-226, 235-247, 251-264, 268-274, 278-294, 298-310, 314-319, 322-325, 329-334, 340, 343-345, 350-355, 358-361, 364-366, 370-380, 385-386
+blib2to3/pgen2/token.py                                    72      3    96%   79, 82, 85
+blib2to3/pgen2/tokenize.py                                342    195    43%   43-46, 169-171, 187-190, 194-195, 200-202, 205-209, 212-223, 226-251, 259-265, 285-338, 358-359, 392-393, 398-416, 425, 430-431, 451, 457-459, 464-471, 482, 486, 488, 490-491, 495-499, 501-514, 519-524, 527-528, 532-535, 539-540, 547-553, 556-557, 562-566, 571-572, 575-577, 580-581, 584, 588-590
+blib2to3/pygram.py                                         17      0   100%
+blib2to3/pytree.py                                        419    271    35%   60-62, 75, 83, 91, 99, 103-122, 126-131, 143-149, 157-166, 175, 185-186, 189-191, 198-201, 204-205, 230, 232, 238, 248, 255, 259, 264-266, 279-281, 285-286, 293-296, 303-305, 312-314, 347-348, 365, 369, 374, 378, 438-439, 442-445, 453, 466-478, 486-488, 496-498, 515-521, 525-527, 542, 565-576, 591-603, 643-653, 657-672, 676, 680-687, 701-732, 736-761, 765-777, 781-791, 805-807, 811, 815, 818-826, 842-854
+env/lib/python3.8/site-packages/attr/__init__.py           22      0   100%
+env/lib/python3.8/site-packages/attr/_compat.py            82     41    50%   16-18, 22-91, 108, 117, 158, 174-195, 217, 224-225
+env/lib/python3.8/site-packages/attr/_config.py             9      4    56%   13-16, 23
+env/lib/python3.8/site-packages/attr/_funcs.py             79     68    14%   44-82, 89-113, 149-212, 224, 244-262, 281-290
+env/lib/python3.8/site-packages/attr/_make.py             694    229    67%   64, 198, 203-210, 296, 305, 320-323, 334, 339, 346, 378-385, 392-393, 404, 419, 426, 487, 516-520, 532-544, 563-565, 580, 596, 604-613, 640, 651-661, 721-722, 728-729, 746, 750-752, 762, 949, 968, 976, 983, 994, 1005, 1029-1034, 1055, 1084-1085, 1116-1126, 1161-1165, 1214, 1220-1223, 1229-1232, 1238-1241, 1247-1250, 1288-1324, 1395-1402, 1423-1430, 1441-1447, 1451, 1492-1493, 1506, 1514, 1526-1531, 1546-1547, 1569, 1573-1605, 1618, 1622-1623, 1631, 1639-1650, 1666, 1670-1671, 1700-1709, 1714-1716, 1720-1725, 1812, 1820, 1848-1850, 1857-1861, 1868, 1877, 1880-1885, 1995, 2016-2020, 2032-2037, 2097-2129, 2145-2146, 2160-2168
+env/lib/python3.8/site-packages/attr/_version_info.py      37     17    54%   58-67, 70-75, 78-85
+env/lib/python3.8/site-packages/attr/converters.py         27     23    15%   21-26, 47-78
+env/lib/python3.8/site-packages/attr/exceptions.py         16      4    75%   69-71, 74
+env/lib/python3.8/site-packages/attr/filters.py            15      9    40%   15, 30-35, 47-52
+env/lib/python3.8/site-packages/attr/validators.py        116     56    52%   34-35, 49, 67, 80-81, 92, 113-139, 150-151, 162, 180, 188-191, 194, 213, 222-228, 235, 255, 264-269, 277, 306-310, 313-318, 339, 352-357, 360, 378
+env/lib/python3.8/site-packages/click/__init__.py          13      0   100%
+env/lib/python3.8/site-packages/click/_compat.py          434    315    27%   22, 27-31, 41-42, 47-50, 57-59, 65-76, 79-82, 86, 100-102, 105, 108-116, 119-128, 131-143, 146-153, 157-260, 275-278, 289-292, 299-307, 314-322, 333-345, 349-374, 380, 387-404, 408-412, 415-419, 422-426, 429-432, 436-439, 445, 450-455, 459-468, 475-516, 524-525, 531-534, 538, 541-550, 553, 556, 559, 562, 577, 579, 587-645, 648, 655, 661-662, 671-672, 679-680
+env/lib/python3.8/site-packages/click/_unicodefun.py       69     59    14%   16-29, 37-41, 52-120
+env/lib/python3.8/site-packages/click/core.py             881    632    28%   35-36, 43-45, 50-58, 62-70, 81, 85-96, 104-115, 123-130, 221-341, 344-346, 349-352, 383-390, 418, 422, 434-435, 439-441, 449-454, 458-461, 465-469, 475-478, 484-488, 496, 500, 504, 510, 516, 534-555, 562-573, 616, 619, 636-642, 649, 656, 695-760, 764, 809, 819-821, 824-828, 832-833, 839-842, 846-850, 854-862, 869-872, 878-880, 884, 896-899, 903-913, 917-925, 929-932, 935-948, 954-956, 988-1007, 1011-1013, 1016-1017, 1044-1054, 1060-1082, 1085-1096, 1099-1164, 1167-1190, 1196, 1202, 1213-1215, 1221-1225, 1233-1237, 1245-1249, 1252, 1255, 1266-1268, 1272, 1275-1280, 1283-1286, 1346, 1366, 1369-1376, 1381-1385, 1388, 1391-1396, 1403-1417, 1427-1428, 1431-1435, 1438-1446, 1449-1457, 1460-1463, 1466-1484, 1487, 1490, 1496-1497, 1550, 1554, 1563, 1582-1585, 1597, 1599, 1601, 1604, 1607-1611, 1622-1624, 1644, 1647-1649, 1652, 1659-1685, 1688-1733, 1740-1745, 1754-1761, 1767-1773, 1776-1784, 1787-1790, 1805, 1810, 1815-1817, 1820-1829, 1833-1835, 1840, 1845, 1848, 1851
+env/lib/python3.8/site-packages/click/decorators.py       147     76    48%   17, 26-28, 53-66, 71, 77-78, 83-85, 126-127, 132, 195-205, 220-225, 241-244, 251-275, 296-307
+env/lib/python3.8/site-packages/click/exceptions.py       115     82    29%   6-8, 18-23, 26, 29, 32-35, 38-40, 54-56, 59-70, 93-95, 98-106, 123-124, 127-148, 165-169, 172-179, 193-194, 206, 213-218, 221, 235
+env/lib/python3.8/site-packages/click/formatting.py       136    112    18%   12-16, 20-22, 45-86, 102-111, 115, 119, 123, 132-150, 154, 158-159, 165-171, 182-208, 217-223, 228-232, 236, 245-256
+env/lib/python3.8/site-packages/click/globals.py           18      5    72%   26, 31, 36, 45, 48
+env/lib/python3.8/site-packages/click/parser.py           237    203    14%   35-73, 77-79, 85, 92-95, 100-113, 119-142, 146, 149-161, 167-169, 172-180, 186-189, 209-226, 238-247, 255-257, 266-273, 276-283, 286-299, 322-351, 354-398, 401-427
+env/lib/python3.8/site-packages/click/termui.py           191    143    25%   42-43, 47-52, 92-138, 160-182, 190-229, 244-258, 344-346, 361-369, 429-430, 432-435, 439, 441, 443, 445, 461, 510-515, 540-541, 569-572, 576-577, 595-606
+env/lib/python3.8/site-packages/click/types.py            321    204    36%   38-39, 55, 65, 69, 77, 83-84, 87-94, 101, 104, 111-123, 126, 145-146, 149, 152, 156-179, 183, 209, 216, 219-222, 226-231, 236, 243-246, 249, 263-265, 268-285, 288, 295-298, 302, 316-318, 321-338, 341, 348-355, 358, 365-371, 374, 408-412, 415-421, 424-452, 503-504, 506-507, 513-518, 521-560, 578, 582, 586, 589-592, 601-605, 608, 619-634
+env/lib/python3.8/site-packages/click/utils.py            179    124    31%   13-14, 22, 27-32, 37-42, 47-67, 79-95, 98, 101-103, 110-121, 125-126, 132-133, 136, 139, 142-143, 149, 152, 155, 158, 161, 164, 218, 222, 229, 237-242, 253-257, 274-277, 291-294, 321-327, 346-348, 363-365, 403-414, 429, 432-437, 440
+tests/__init__.py                                           0      0   100%
+tests/test_black.py                                       227    148    35%   23, 43, 58-59, 65-66, 71-76, 80-85, 88-100, 104-109, 113-117, 121-125, 129-133, 137-141, 145-149, 153-157, 161-165, 169-173, 177-181, 189, 192-261, 268-283, 287
+-------------------------------------------------------------------------------------
+TOTAL                                                    6402   3813    40%
+

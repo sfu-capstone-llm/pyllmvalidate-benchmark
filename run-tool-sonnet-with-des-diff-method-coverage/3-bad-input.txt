@@ -1,0 +1,171 @@
+
+# Description
+
+# PR - Change exit code to 2 when config file doesn't exist
+
+Fixes #1360, where an invalid config file causes a return/exit code of 1. This change means this case is caught earlier, treated like any other bad parameters, and results in an exit code of 2.
+
+Unit test fails before change is made:
+
+======================================================================
+FAIL: test_invalid_config_return_code (tests.test_black.BlackTestCase)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<snip>/black/tests/test_black.py", line 1654, in test_invalid_config_return_code
+    self.invokeBlack(args, exit_code=2, ignore_config=False)
+  File "<snip>/black/tests/test_black.py", line 162, in invokeBlack
+    self.assertEqual(result.exit_code, exit_code, msg=runner.stderr_bytes.decode())
+AssertionError: 1 != 2 : Error: Could not open file <snip>/blk_h9d894at.log: Error reading configuration file: [Errno 2] No such file or directory: '<snip>/blk_h9d894at.log'
+
+# Issue 1360 - Black --check returns 1 when invalid config file is specified
+
+Describe the bug
+
+--check returns 1 when invalid --config is specified, not some higher error code as implied. This can make debugging issues tricky for CI integrations relying on return codes. I wouldn't go so far as to call it a bug, but it was a bit unexpected to me.
+
+(It also happens without --check.)
+
+To Reproduce
+
+$ printf "def a():\n    pass\n" | black - --check; echo "return: $?"
+def a():
+    pass
+All done! ✨ 🍰 ✨
+1 file left unchanged.
+return: 0
+$ printf "def a():\n    pass\n" | black - --check --config "foo"; echo "return: $?"
+Error: Could not open file foo: Error reading configuration file: [Errno 2] No such file or directory: 'foo'
+return: 1
+Expected behavior
+
+--check says:
+
+Don't write the files back, just return the status. Return code 0 means nothing would change. Return code 1 means some files would be reformatted. Return code 123 means there was an internal error.
+
+So I would expect this case to return an error code other than 1.
+
+Environment (please complete the following information):
+
+Version: 19.10b0, master (both tested)
+OS and Python version: macOS 10.15.3 with Python 3.7.7; and Ubuntu 18.04.4 with Python 3.6.9
+Does this bug also happen on master?
+
+Yes (tested via cloning and pipenv shell)
+
+Additional context
+
+This can be very awkward to debug in a CI environment if you rely on return codes only.
+
+# Diff
+
+diff --git a/black.py b/black.py
+index d9348a3..26a2915 100644
+--- a/black.py
++++ b/black.py
+@@ -394,7 +394,7 @@ def target_version_option_callback(
+ @click.option(
+     "--config",
+     type=click.Path(
+-        exists=False, file_okay=True, dir_okay=False, readable=True, allow_dash=False
++        exists=False, file_okay=True, dir_okay=False, readable=True, allow_dash=False
+     ),
+     is_eager=True,
+     callback=read_pyproject_toml,
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->posixpath.join
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pygram.initialize->posixpath.dirname
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->typing.inner
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.dump->tempfile.NamedTemporaryFile
+blib2to3.pgen2.grammar.dump->posixpath.dirname
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->typing.inner
+black.dont_increase_indentation->functools.update_wrapper
+black.dont_increase_indentation->functools.wraps
+black.dump_to_file->tempfile.__exit__
+black.dump_to_file->tempfile.__enter__
+black.dump_to_file->tempfile.NamedTemporaryFile
+black.read_pyproject_toml->click.exceptions.__init__
+black.read_pyproject_toml->black.parse_pyproject_toml
+black.parse_pyproject_toml->toml.decoder.load
+
+# Coverage
+
+Name                              Stmts   Miss  Cover   Missing
+---------------------------------------------------------------
+black.py                           2042   1667    18%   107-110, 129, 196-209, 217, 222-224, 233-234, 247-249, 258-264, 275, 423-498, 507-510, 521-543, 550-570, 589-641, 657-687, 699-720, 730-740, 772-802, 811-819, 823-858, 863-885, 890-891, 910-922, 926-928, 936-953, 961-964, 1105-1128, 1132, 1140, 1147-1151, 1159-1164, 1168-1178, 1186-1191, 1195-1204, 1208, 1233-1249, 1257-1266, 1271, 1276, 1281, 1286, 1295, 1305-1360, 1365-1374, 1387, 1400, 1408-1412, 1415-1448, 1451-1479, 1482, 1486-1519, 1523-1556, 1560, 1564-1566, 1572-1584, 1590-1601, 1605, 1629-1639, 1642-1678, 1683-1722, 1746-1752, 1756-1782, 1787-1788, 1795-1802, 1818-1823, 1827-1830, 1834-1846, 1850-1861, 1865-1867, 1871, 1875-1876, 1879-1881, 1888-1898, 1902-1922, 1939-2160, 2165-2178, 2183-2186, 2194-2211, 2222-2225, 2236-2321, 2347-2348, 2372-2403, 2414-2422, 2440-2504, 2514-2540, 2557-2629, 2646-2652, 2666-2697, 2708-2710, 2722-2782, 2790-2813, 2818-2821, 2833-2835, 2844-2853, 2863-2869, 2880-2945, 2954-2981, 2986-2990, 3002-3041, 3046-3048, 3056-3102, 3110-3123, 3134-3159, 3166-3170, 3182, 3194-3201, 3212-3219, 3224-3231, 3240-3241, 3246-3262, 3273-3285, 3290-3291, 3296-3304, 3309-3316, 3329-3348, 3357-3360, 3366-3380, 3392-3429, 3434-3435, 3450-3487, 3492-3537, 3543-3548, 3566-3605, 3618-3635, 3652-3664, 3668-3669, 3672-3673, 3686-3692, 3699-3721, 3725-3740, 3747-3756, 3762-3829, 3839-3845, 3860-3862, 3872, 3877-3881, 3888-3890, 3895-3916, 3925, 3933-3936, 3941-3944, 3954-3966, 3974-3976, 3990-4016, 4026-4105, 4109, 4117-4127, 4132-4133, 4142-4149, 4154-4162, 4176-4184, 4188-4190, 4194
+blackd.py                           116     83    28%   51-55, 59-73, 77-149, 153-184, 188-190, 194
+env/src/black/_black_version.py       1      0   100%
+tests/__init__.py                     0      0   100%
+tests/test_black.py                1350   1066    21%   27-28, 48, 53-71, 76-81, 86-94, 99-105, 137-153, 160, 166-172, 176-180, 183-191, 194, 197, 200, 203, 206, 209, 212, 215, 218, 221, 224, 227, 230, 233-242, 245-265, 269-273, 277-281, 285-289, 293-297, 301-306, 309-314, 317-328, 331-353, 357-361, 365-370, 373-378, 382-391, 395-399, 403-407, 411-415, 419-423, 427-431, 435-439, 443-447, 451-455, 459-463, 467-471, 475-479, 483-487, 491-495, 499-503, 507-511, 515-520, 524-529, 533-536, 540-544, 548-553, 557-561, 565-569, 573-584, 588-599, 603-609, 613-617, 621-625, 629-633, 637-641, 645-649, 653-657, 661-665, 669-673, 676-695, 698-793, 800-887, 894-984, 991-1013, 1016-1044, 1047-1074, 1077-1094, 1101-1118, 1121-1124, 1128-1144, 1147-1158, 1161-1169, 1173-1191, 1194-1201, 1204-1211, 1214-1216, 1219-1226, 1229-1242, 1245-1249, 1253-1266, 1269-1272, 1276-1284, 1287-1289, 1292-1298, 1301-1310, 1313-1317, 1320-1335, 1339-1360, 1363-1369, 1372-1387, 1391-1412, 1415-1419, 1422-1430, 1433-1449, 1452-1470, 1473-1500, 1503-1527, 1530-1531, 1534-1543, 1546-1556, 1559-1560, 1563-1601, 1604-1623, 1626-1638, 1642-1646, 1661, 1669-1672, 1678-1680, 1686-1689, 1698-1701, 1707-1710, 1716-1730, 1736-1741, 1747-1762, 1768-1800, 1806-1809, 1815-1818, 1824-1825, 1829
+---------------------------------------------------------------
+TOTAL                              3509   2816    20%
+

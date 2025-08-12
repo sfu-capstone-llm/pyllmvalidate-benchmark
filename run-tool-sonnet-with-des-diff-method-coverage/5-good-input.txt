@@ -1,0 +1,251 @@
+
+# Description
+
+# PR - Fix trailing comma for function with one arg (#880)
+
+Modified maybe_remove_trailing_comma to remove trailing commas for typedarglists (in addition to arglists), and updated line split logic to ensure that all lines in a function definition that contain only one arg have a trailing comma.
+
+Some discussion points:
+
+There are likely some edge cases to consider with the use of no_commas. Would be great to hear any other suggestions for this test.
+The new test data file should probably be folded into one of the existing function test files, are there any guidelines around this?
+It looks like this will clash with Pull request tweak collection literals to explode with trailing comma #826.
+
+# Issue #880 - Trailing comma for function with one arg
+
+A function with one argument keeps the trailing comma but if there are two it is stripped.
+
+In:
+
+def one(
+    a,
+):
+    pass
+
+def two(
+    a,
+    b,
+):
+    pass
+Out
+
+def one(a,):
+    pass
+
+
+def two(a, b):
+    pass
+From https://black.now.sh/?version=stable&state=_Td6WFoAAATm1rRGAgAhARYAAAB0L-Wj4ACGAFNdAD2IimZxl1N_WlbvK5V-4TOOTwYyJEleH-JCdis69M0BXQy1O1PWCxUpRscYAufHo8BjrjIj1dM6YL_cyWPemFXxt1cpBhl0f8lWpI3sZ5u99cYAAACFuqAGuJSBnwABb4cBAAAAtWKNgbHEZ_sCAAAAAARZWg==
+
+# Diff
+
+diff --git a/black.py b/black.py
+index 635eba2..8318674 100644
+--- a/black.py
++++ b/black.py
+@@ -1352,7 +1352,10 @@ class Line:
+             bracket_depth = leaf.bracket_depth
+             if bracket_depth == depth and leaf.type == token.COMMA:
+                 commas += 1
+-                if leaf.parent and leaf.parent.type == syms.arglist:
++                if leaf.parent and leaf.parent.type in {
++                    syms.arglist,
++                    syms.typedargslist,
++                }:
+                     commas += 1
+                     break
+ 
+@@ -2488,9 +2491,13 @@ def bracket_split_build_line(
+         if leaves:
+             # Since body is a new indent level, remove spurious leading whitespace.
+             normalize_prefix(leaves[0], inside_brackets=True)
+-            # Ensure a trailing comma for imports, but be careful not to add one after
+-            # any comments.
+-            if original.is_import:
++            # Ensure a trailing comma for imports and standalone function arguments, but
++            # be careful not to add one after any comments.
++            no_commas = original.is_def and not any(
++                l.type == token.COMMA for l in leaves
++            )
++
++            if original.is_import or no_commas:
+                 for i in range(len(leaves) - 1, -1, -1):
+                     if leaves[i].type == STANDALONE_COMMENT:
+                         continue
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.load
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.driver._newer->genericpath.getmtime
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->functools.update_wrapper
+black.dont_increase_indentation->functools.wraps
+black.dont_increase_indentation->typing.inner
+black.format_str->.__init__
+black.format_str->black.__str__
+black.format_str->black.maybe_empty_lines
+black.format_str->black.get_future_imports
+black.format_str->black.detect_target_versions
+black.format_str->black.lib2to3_parse
+black.format_str->black.visit
+black.format_str->black.supports_feature
+black.format_str->enum.__hash__
+black.format_str->black.normalize_fmt_off
+black.format_str->typing.__new__
+black.format_str->black.<setcomp>
+black.format_str->black.split_line
+black.lib2to3_parse->black.get_grammars
+black.lib2to3_parse->blib2to3.pgen2.driver.parse_string
+black.lib2to3_parse->blib2to3.pgen2.tokenize.generate_tokens
+black.lib2to3_parse->blib2to3.pgen2.driver.__init__
+blib2to3.pgen2.driver.__init__->logging.getLogger
+blib2to3.pgen2.driver.parse_string->blib2to3.pgen2.driver.parse_tokens
+blib2to3.pgen2.driver.parse_tokens->logging.debug
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.__init__
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.addtoken
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.setup
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.driver._partially_consume_prefix
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.classify
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.push
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.pop
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.shift
+blib2to3.pgen2.parse.shift->blib2to3.pytree.convert
+blib2to3.pytree.convert->blib2to3.pytree.__init__
+blib2to3.pytree.convert->blib2to3.pytree.__new__
+blib2to3.pgen2.parse.pop->blib2to3.pytree.convert
+blib2to3.pytree.__init__->blib2to3.pytree.invalidate_sibling_maps
+black.get_future_imports->typing.inner
+black.detect_target_versions->black.get_features_used
+black.detect_target_versions->black.<setcomp>
+black.detect_target_versions->enum.__iter__
+black.get_features_used->blib2to3.pytree.pre_order
+blib2to3.pytree.pre_order->blib2to3.pytree.pre_order
+black.normalize_fmt_off->black.convert_one_fmt_off_pair
+black.convert_one_fmt_off_pair->black.list_comments
+black.convert_one_fmt_off_pair->blib2to3.pytree.prefix
+black.convert_one_fmt_off_pair->blib2to3.pytree.leaves
+blib2to3.pytree.leaves->blib2to3.pytree.leaves
+black.supports_feature->black.<genexpr>
+black.visit->black.visit_ENDMARKER
+black.visit->black.visit_DEDENT
+black.visit->black.visit_stmt
+black.visit->black.visit_suite
+black.visit->black.visit_simple_stmt
+black.visit->black.visit_atom
+black.visit->black.visit_default
+black.visit->blib2to3.pytree.type_repr
+black.visit->black.visit_INDENT
+blib2to3.pytree.type_repr->importlib._bootstrap.parent
+black.visit_default->black.visit
+black.visit_default->black.visit_default
+black.visit_default->black.any_open_brackets
+black.visit_default->black.normalize_prefix
+black.visit_default->black.append
+black.visit_default->black.normalize_numeric_literal
+black.visit_default->black.generate_comments
+black.visit_stmt->black.line
+black.visit_stmt->black.normalize_invisible_parens
+black.visit_stmt->black.visit
+black.normalize_invisible_parens->blib2to3.pytree.prefix
+blib2to3.pytree.prefix->blib2to3.pytree.changed
+blib2to3.pytree.prefix->blib2to3.pytree.prefix
+black.line->black.__bool__
+black.line->.__init__
+black.generate_comments->black.list_comments
+black.generate_comments->blib2to3.pytree.prefix
+black.normalize_prefix->blib2to3.pytree.prefix
+blib2to3.pytree.changed->blib2to3.pytree.changed
+black.append->black.mark
+black.append->black.whitespace
+black.append->black.maybe_remove_trailing_comma
+black.append->black.is_class_paren_empty
+black.append->blib2to3.pytree.prefix
+black.append->black.append_comment
+black.append->black.is_complex_subscript
+black.mark->black.maybe_decrement_after_lambda_arguments
+black.mark->black.is_split_after_delimiter
+black.mark->black.maybe_decrement_after_for_loop_variable
+black.mark->black.is_split_before_delimiter
+black.mark->black.maybe_increment_lambda_arguments
+black.mark->black.maybe_increment_for_loop_variable
+black.is_split_before_delimiter->black.is_vararg
+black.is_complex_subscript->black.get_open_lsqb
+black.whitespace->blib2to3.pytree.prev_sibling
+black.whitespace->blib2to3.pytree.prefix
+black.whitespace->black.preceding_leaf
+blib2to3.pytree.prev_sibling->blib2to3.pytree.update_sibling_maps
+black.preceding_leaf->blib2to3.pytree.prev_sibling
+black.maybe_remove_trailing_comma->black.is_import
+black.maybe_remove_trailing_comma->black.remove_trailing_comma
+black.is_import->black.__bool__
+black.is_import->black.is_import
+black.is_class_paren_empty->black.__bool__
+black.is_class_paren_empty->black.is_class
+black.visit_suite->black.visit_default
+black.visit_INDENT->black.line
+black.visit_INDENT->black.visit_default
+black.maybe_empty_lines->black._maybe_empty_lines
+black._maybe_empty_lines->black.is_class
+black._maybe_empty_lines->black._maybe_empty_lines_for_class_or_def
+black._maybe_empty_lines->black.is_def
+black._maybe_empty_lines->blib2to3.pytree.prefix
+black._maybe_empty_lines->black.__bool__
+black._maybe_empty_lines->black.is_import
+black._maybe_empty_lines->black.is_decorator
+black.is_decorator->black.__bool__
+black._maybe_empty_lines_for_class_or_def->black.is_decorator
+black._maybe_empty_lines_for_class_or_def->black.is_comment
+black.split_line->black.__str__
+black.split_line->black.is_line_short_enough
+black.split_line->black.contains_inner_type_comments
+black.split_line->black.is_comment
+black.__str__->black.__bool__
+black.__str__->blib2to3.pytree.prefix
+black.__str__->blib2to3.pytree.__unicode__
+blib2to3.pytree.__unicode__->blib2to3.pytree.prefix
+black.is_line_short_enough->black.contains_standalone_comments
+black.visit_simple_stmt->black.line
+black.visit_simple_stmt->black.visit_default
+black.visit_atom->black.visit_default
+black.visit_DEDENT->black.line
+black.visit_DEDENT->black.visit_default
+black.is_class->black.__bool__
+black.normalize_numeric_literal->black.format_float_or_int_string
+black.visit_ENDMARKER->black.line
+black.visit_ENDMARKER->black.visit_default
+black.assert_equivalent->black._v
+black.assert_equivalent->typing.inner
+black.assert_equivalent->black.parse_ast
+black.parse_ast->typed_ast.ast3.parse
+black._v->black._v
+black.assert_stable->black.format_str
+
+# Coverage
+
+Name                  Stmts   Miss  Cover   Missing
+---------------------------------------------------
+black.py               1939   1200    38%   105-108, 127, 190-203, 218-243, 391-463, 474-496, 507-526, 545-597, 613-646, 658-679, 691-701, 714, 734, 751-759, 775-797, 803, 811-820, 823, 829-830, 867-884, 892-895, 1036, 1048, 1052, 1070, 1077-1081, 1090-1092, 1104-1106, 1117-1119, 1130-1132, 1167, 1186-1195, 1224, 1233-1234, 1238-1239, 1266, 1276-1277, 1289-1292, 1296, 1299-1300, 1305-1309, 1321-1322, 1325-1328, 1333-1334, 1346, 1350, 1366, 1374-1375, 1380-1386, 1390, 1406-1414, 1430, 1476, 1481, 1493, 1500, 1514, 1519, 1526, 1529-1541, 1545, 1583-1596, 1600-1601, 1624-1625, 1672, 1680-1685, 1694-1705, 1709-1711, 1715, 1723-1725, 1776, 1793-1799, 1802-1815, 1818-1819, 1822-1823, 1830, 1841, 1853-1854, 1859, 1863, 1870-1871, 1876-1878, 1882-1895, 1899-1908, 1912, 1915-1920, 1923-1927, 1931-1939, 1948-1949, 1953-1970, 1973-1982, 1985, 1998-2002, 2005, 2010-2013, 2021-2038, 2050, 2066, 2081, 2084, 2091, 2102-2106, 2113, 2116, 2119, 2131, 2143, 2146, 2175, 2203-2230, 2241-2249, 2268-2269, 2282-2325, 2335-2361, 2378-2450, 2467-2473, 2487-2516, 2527-2529, 2541-2601, 2609-2632, 2652-2654, 2668, 2682-2688, 2699-2763, 2775, 2778-2779, 2781-2789, 2791-2796, 2807-2808, 2821-2823, 2833, 2836-2870, 2890-2931, 2941-2949, 2958-2977, 2982, 2992-3006, 3015-3031, 3045-3054, 3059-3060, 3065-3073, 3078-3085, 3098-3117, 3126-3129, 3135-3149, 3163-3165, 3169, 3179, 3183, 3186-3188, 3211-3248, 3256-3268, 3273-3290, 3308-3334, 3347-3364, 3380-3392, 3396-3397, 3400-3401, 3414-3420, 3427-3449, 3456-3459, 3472, 3476, 3480-3481, 3494-3495, 3509-3510, 3517-3519, 3528-3529, 3541-3545, 3555-3562, 3567-3571, 3578-3580, 3585-3606, 3615, 3623-3625, 3630-3633, 3643-3655, 3664, 3679-3705, 3715-3794, 3798, 3806-3816, 3821-3822, 3831-3838, 3843-3851, 3865-3873, 3877-3879, 3883
+blackd.py               100     71    29%   42-46, 50-64, 68-121, 125-152, 156-158, 162
+tests/__init__.py         0      0   100%
+tests/test_black.py    1222    984    19%   36-37, 54, 76, 82-87, 92-102, 109, 120-124, 128-136, 145-158, 164-168, 172-176, 179-187, 191-196, 200-205, 208-217, 220-240, 244-249, 253-257, 261-265, 277-281, 284-295, 298-320, 324-328, 332-341, 345-349, 353-357, 361-365, 369-373, 377-381, 385-389, 393-397, 401-405, 409-413, 417-421, 425-429, 433-437, 441-445, 449-453, 457-461, 465-470, 474-479, 483-486, 490-494, 498-503, 507-511, 515-519, 523-534, 538-549, 553-557, 561-565, 569-573, 577-581, 585-589, 593-597, 600-619, 622-710, 717-797, 804-887, 894-916, 919-947, 950-977, 980-997, 1004-1021, 1024-1027, 1031-1047, 1050-1061, 1064-1072, 1076-1094, 1097-1104, 1107-1114, 1117-1119, 1122-1129, 1132-1145, 1148-1152, 1156-1169, 1172-1175, 1179-1187, 1190-1192, 1195-1201, 1204-1213, 1216-1231, 1235-1256, 1259-1265, 1268-1283, 1287-1308, 1311-1319, 1322-1335, 1338-1359, 1362-1380, 1383-1384, 1387-1396, 1399-1409, 1412-1413, 1416-1444, 1447-1466, 1469-1481, 1486-1491, 1496-1500, 1505-1510, 1518-1523, 1528-1533, 1538-1557, 1562-1569, 1574-1601, 1606-1611, 1616-1623, 1627-1631, 1635
+---------------------------------------------------
+TOTAL                  3261   2255    31%
+

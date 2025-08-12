@@ -1,0 +1,99 @@
+
+# Description
+
+# PR - Fix trailing comma for function with one arg (#880)
+
+Modified maybe_remove_trailing_comma to remove trailing commas for typedarglists (in addition to arglists), and updated line split logic to ensure that all lines in a function definition that contain only one arg have a trailing comma.
+
+Some discussion points:
+
+There are likely some edge cases to consider with the use of no_commas. Would be great to hear any other suggestions for this test.
+The new test data file should probably be folded into one of the existing function test files, are there any guidelines around this?
+It looks like this will clash with Pull request tweak collection literals to explode with trailing comma #826.
+
+# Issue #880 - Trailing comma for function with one arg
+
+A function with one argument keeps the trailing comma but if there are two it is stripped.
+
+In:
+
+def one(
+    a,
+):
+    pass
+
+def two(
+    a,
+    b,
+):
+    pass
+Out
+
+def one(a,):
+    pass
+
+
+def two(a, b):
+    pass
+From https://black.now.sh/?version=stable&state=_Td6WFoAAATm1rRGAgAhARYAAAB0L-Wj4ACGAFNdAD2IimZxl1N_WlbvK5V-4TOOTwYyJEleH-JCdis69M0BXQy1O1PWCxUpRscYAufHo8BjrjIj1dM6YL_cyWPemFXxt1cpBhl0f8lWpI3sZ5u99cYAAACFuqAGuJSBnwABb4cBAAAAtWKNgbHEZ_sCAAAAAARZWg==
+
+# Diff
+
+diff --git a/black.py b/black.py
+index 635eba2..8318674 100644
+--- a/black.py
++++ b/black.py
+@@ -1352,7 +1352,10 @@ class Line:
+             bracket_depth = leaf.bracket_depth
+             if bracket_depth == depth and leaf.type == token.COMMA:
+                 commas += 1
+-                if leaf.parent and leaf.parent.type == syms.arglist:
++                if leaf.parent and leaf.parent.type in {
++                    syms.arglist,
++                    syms.typedargslist,
++                }:
+                     commas += 1
+                     break
+ 
+@@ -2488,9 +2491,13 @@ def bracket_split_build_line(
+         if leaves:
+             # Since body is a new indent level, remove spurious leading whitespace.
+             normalize_prefix(leaves[0], inside_brackets=True)
+-            # Ensure a trailing comma for imports, but be careful not to add one after
+-            # any comments.
+-            if original.is_import:
++            # Ensure a trailing comma for imports and standalone function arguments, but
++            # be careful not to add one after any comments.
++            no_commas = original.is_def and not any(
++                l.type == token.COMMA for l in leaves
++            )
++
++            if original.is_import and not no_commas:
+                 for i in range(len(leaves) - 1, -1, -1):
+                     if leaves[i].type == STANDALONE_COMMENT:
+                         continue
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.load
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.driver._newer->genericpath.getmtime
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->functools.update_wrapper
+black.dont_increase_indentation->typing.inner
+black.dont_increase_indentation->functools.wraps

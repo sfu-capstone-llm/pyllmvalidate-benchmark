@@ -1,0 +1,208 @@
+
+# Description
+
+# PR - Fix for "# fmt: on" with decorators
+
+Re-submitting #1324 using correct email.
+
+This is quick and likely dirty fix for #560. It is based on assumption that indentation has semantic meaning in Python so in case if # fmt: on exists in node children at the same column as opening # fmt: off we should process each child separately excluding only those before # fmt: on.
+
+This seems to work for my use case which is blocking black adoption in my team and doesn't break any tests but it would be great if someone with more experience in codebase could help to polish it because I dived into black source code only two hours ago.
+
+Thanks!
+
+# Issue #560 - "fmt: on" does not work when crossing block boundaries and decorators
+
+Operating system: Linux Mint 19.0
+Python version: 3.6.6
+Black version: 18.9b0
+Does also happen on master: yes
+
+Simplest reproducer: the following is left unchanged. In fact, it behaves as if # fmt: off is true until end of file.
+
+# fmt: off
+if (x and y):
+# fmt: on
+    pass
+
+if (x and y):
+    pass
+The soonest # fmt: on takes effect is at end of the indented if block.
+
+Ran into this with a series of decorators:
+
+# fmt: off
+@click.command()
+@click.option("-a", "--align",      help="aligned help texts")
+@click.option("-b", "--big-option", help="should stay aligned")
+# fmt: on
+def foo(align,    big_option):
+    pass
+Simple workaround for me is keep the formatter commands within a "block" - the following works perfectly fine:
+
+@click.command()
+# fmt: off
+@click.option("-a", "--align",      help="aligned help texts")
+@click.option("-b", "--big-option", help="should stay aligned")
+# fmt: on
+def foo(align, big_option):
+    pass
+
+
+# Diff
+
+diff --git a/black.py b/black.py
+index 2df03f7..e55e4fe 100644
+--- a/black.py
++++ b/black.py
+@@ -3116,18 +3116,49 @@ def generate_ignored_nodes(leaf: Leaf) -> Iterator[LN]:
+     """
+     container: Optional[LN] = container_of(leaf)
+     while container is not None and container.type != token.ENDMARKER:
+-        is_fmt_on = False
+-        for comment in list_comments(container.prefix, is_endmarker=False):
+-            if comment.value in FMT_ON:
+-                is_fmt_on = True
+-            elif comment.value in FMT_OFF:
+-                is_fmt_on = False
+-        if is_fmt_on:
++        if fmt_off(container):
+             return
+ 
+-        yield container
++        # fix for fmt: on in children
++        if contains_fmt_off_at_column(container, leaf.column):
++            for child in container.children:
++                if contains_fmt_off_at_column(child, leaf.column):
++                    return
++                yield child
++        else:
++            yield container
++            container = container.next_sibling
++
+ 
+-        container = container.next_sibling
++def fmt_off(container: LN) -> bool:
++    is_fmt_off = False
++    for comment in list_comments(container.prefix, is_endmarker=False):
++        if comment.value in FMT_OFF:
++            is_fmt_off = True
++        elif comment.value in FMT_ON:
++            is_fmt_off = False
++    return is_fmt_off
++
++
++def contains_fmt_off_at_column(container: LN, column: int) -> bool:
++    for child in container.children:
++        if (
++            isinstance(child, Node)
++            and first_leaf_column(child) == column
++            or isinstance(child, Leaf)
++            and child.column == column
++        ):
++            if fmt_off(child):
++                return True
++
++    return False
++
++
++def first_leaf_column(node: Node) -> Optional[int]:
++    for child in node.children:
++        if isinstance(child, Leaf):
++            return child.column
++    return None
+ 
+ 
+ def maybe_make_parens_invisible_in_atom(node: LN, parent: LN) -> bool:
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pygram.initialize->posixpath.dirname
+blib2to3.pygram.initialize->posixpath.join
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.make_dfa->typing.inner
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.dump->tempfile.NamedTemporaryFile
+blib2to3.pgen2.grammar.dump->posixpath.dirname
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->typing.inner
+black.dont_increase_indentation->functools.update_wrapper
+black.dont_increase_indentation->functools.wraps
+
+# Coverage
+
+Name                              Stmts   Miss  Cover   Missing
+---------------------------------------------------------------
+black.py                           2061   1693    18%   107-110, 129, 196-209, 217, 222-224, 232-234, 245-266, 277, 430-505, 514-517, 528-550, 557-577, 596-648, 664-694, 706-727, 737-747, 779-809, 818-826, 830-865, 870-892, 897-898, 917-929, 933-935, 943-960, 968-971, 1112-1135, 1139, 1147, 1154-1158, 1166-1171, 1175-1185, 1193-1198, 1202-1211, 1215, 1240-1256, 1264-1273, 1278, 1283, 1288, 1293, 1302, 1312-1367, 1372-1381, 1394, 1407, 1415-1419, 1422-1455, 1458-1486, 1489, 1493-1526, 1530-1563, 1567, 1571-1573, 1579-1591, 1597-1608, 1612, 1636-1646, 1649-1685, 1690-1729, 1753-1759, 1763-1789, 1794-1795, 1802-1809, 1825-1830, 1834-1837, 1841-1853, 1857-1868, 1872-1874, 1878, 1882-1883, 1886-1888, 1895-1905, 1909-1929, 1946-2167, 2172-2185, 2190-2193, 2201-2218, 2229-2232, 2243-2328, 2354-2355, 2379-2410, 2421-2429, 2447-2511, 2521-2547, 2564-2636, 2653-2659, 2673-2704, 2715-2717, 2729-2789, 2797-2820, 2825-2828, 2840-2842, 2851-2860, 2870-2876, 2887-2952, 2961-2988, 2993-2997, 3009-3048, 3053-3055, 3063-3109, 3117-3130, 3134-3140, 3144-3154, 3158-3161, 3172-3197, 3204-3208, 3220, 3232-3239, 3250-3257, 3262-3269, 3278-3279, 3284-3300, 3311-3323, 3328-3329, 3334-3342, 3347-3354, 3367-3386, 3395-3398, 3404-3418, 3430-3467, 3472-3473, 3488-3525, 3530-3575, 3581-3586, 3604-3643, 3656-3673, 3690-3702, 3706-3707, 3710-3711, 3724-3730, 3737-3759, 3763-3778, 3785-3794, 3800-3867, 3877-3883, 3894-3901, 3910, 3915-3919, 3926-3928, 3933-3954, 3963, 3971-3974, 3979-3982, 3992-4004, 4012-4014, 4028-4054, 4064-4143, 4147, 4155-4165, 4170-4171, 4180-4187, 4192-4200, 4214-4222, 4226-4228, 4232
+blackd.py                           116     83    28%   51-55, 59-73, 77-149, 153-184, 188-190, 194
+env/src/black/_black_version.py       1      0   100%
+tests/__init__.py                     0      0   100%
+tests/test_black.py                1357   1088    20%   27-28, 48, 59-71, 76-81, 86-94, 99-105, 114-118, 122-130, 137-153, 158-162, 166-172, 176-180, 183-191, 194, 197, 200, 203, 206, 209, 212, 215, 218, 221, 224, 227, 230, 233-242, 245-265, 269-273, 277-281, 285-289, 293-297, 301-306, 309-314, 317-328, 331-353, 357-361, 365-370, 373-378, 382-391, 395-399, 403-407, 411-415, 419-423, 427-431, 435-439, 443-447, 451-455, 459-463, 467-471, 475-479, 483-487, 491-495, 499-503, 507-511, 515-520, 524-529, 533-536, 540-544, 548-553, 557-561, 565-569, 573-584, 588-599, 603-609, 613-617, 621-625, 629-633, 638-641, 645-649, 653-657, 661-665, 669-673, 677-681, 684-703, 706-801, 808-895, 902-992, 999-1021, 1024-1052, 1055-1082, 1085-1102, 1109-1126, 1129-1132, 1136-1152, 1155-1166, 1169-1177, 1181-1199, 1202-1209, 1212-1219, 1222-1224, 1227-1234, 1237-1250, 1253-1257, 1261-1274, 1277-1280, 1284-1292, 1295-1297, 1300-1306, 1309-1318, 1321-1325, 1328-1343, 1347-1368, 1371-1377, 1380-1395, 1399-1420, 1423-1427, 1430-1438, 1441-1457, 1460-1478, 1481-1508, 1511-1535, 1538-1539, 1542-1551, 1554-1564, 1567-1568, 1571-1609, 1612-1631, 1634-1646, 1650-1654, 1657-1664, 1669, 1677-1680, 1686-1688, 1694-1697, 1706-1709, 1715-1718, 1724-1738, 1744-1749, 1755-1770, 1776-1808, 1814-1817, 1823-1826, 1832-1833, 1837
+---------------------------------------------------------------
+TOTAL                              3535   2864    19%
+

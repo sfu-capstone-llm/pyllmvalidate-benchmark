@@ -1,0 +1,190 @@
+
+# Description
+
+# PR - Ignore symbolic links pointing outside of the root directory
+
+Within the structure of files to analyze, if there is a symbolic link pointing to a file or a directory outside of the root directory, this symlink is now ignored, as it appears to be out of the scope of the analyzed project.
+
+This PR fixes #338.
+
+# Issue #338 - Crash if there is a symlink to a resource outside of the root directory
+
+Hello there, thank you for this great tool!
+
+Black crashes when it finds a symbolic link pointing to a file or a directory outside of the root directory.
+
+Steps to reproduce
+
+Create the following structure:
+base
+  |-- repo
+  |     |-- dummy.py
+  |     `-- resource -> ../resource
+  `-- resource
+Initiate base/repo as a Git repository (so as to set the root directory);
+Call black . within base/repo;
+Expected behavior: Black ends as expected;
+Current behavior: throws an exception:
+Traceback (most recent call last):
+  File "/home/neraste/.virtualenvs/test_black/bin/black", line 11, in <module>
+    sys.exit(main())
+  File "/home/neraste/.virtualenvs/test_black/lib/python3.6/site-packages/click/core.py", line 722, in __call__
+    return self.main(*args, **kwargs)
+  File "/home/neraste/.virtualenvs/test_black/lib/python3.6/site-packages/click/core.py", line 697, in main
+    rv = self.invoke(ctx)
+  File "/home/neraste/.virtualenvs/test_black/lib/python3.6/site-packages/click/core.py", line 895, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "/home/neraste/.virtualenvs/test_black/lib/python3.6/site-packages/click/core.py", line 535, in invoke
+    return callback(*args, **kwargs)
+  File "/home/neraste/.virtualenvs/test_black/lib/python3.6/site-packages/click/decorators.py", line 17, in new_func
+    return f(get_current_context(), *args, **kwargs)
+  File "/home/neraste/.virtualenvs/test_black/lib/python3.6/site-packages/black.py", line 347, in main
+    gen_python_files_in_dir(p, root, include_regex, exclude_regex, report)
+  File "/home/neraste/.virtualenvs/test_black/lib/python3.6/site-packages/black.py", line 2942, in gen_python_files_in_dir
+    normalized_path = "/" + child.resolve().relative_to(root).as_posix()
+  File "/usr/lib64/python3.6/pathlib.py", line 872, in relative_to
+    .format(str(self), str(formatted)))
+ValueError: '/data/test_black/base/resource' does not start with '/data/test_black/base/repo'
+As pointed out in the backtrace, this is due to the line 2942, where the resolved path of the files is made relative to the root directory. This is indeed impossible if the file is outside of the root directory. One can wonder if it makes sense to have an external link within a repository, but, well I am in this case.
+
+Adding the conflicting file/folder to the exclude list does not work.
+
+Possible workaround
+
+A possible workaround could be to simply ignore this case and do not handle this simlinked resource:
+
+        try:
+            normalized_path = "/" + child.resolve().relative_to(root).as_posix()
+
+        except ValueError:
+            if child.is_symlink():
+                continue                                                        
+
+            raise
+Additional information
+
+Operating system: GNU/Linux OpenSUSE Tumbleweed
+Python version: 3.6
+Black version: 18.6b2
+Does also happen on master: yes
+
+# Diff
+
+diff --git a/black.py b/black.py
+index 9d9bada..e3b3882 100644
+--- a/black.py
++++ b/black.py
+@@ -2941,11 +2941,22 @@ def gen_python_files_in_dir(
+     """Generate all files under `path` whose paths are not excluded by the
+     `exclude` regex, but are included by the `include` regex.
+ 
++    Symbolic links pointing outside of the root directory are ignored.
++
+     `report` is where output about exclusions goes.
+     """
+     assert root.is_absolute(), f"INTERNAL ERROR: `root` must be absolute but is {root}"
+     for child in path.iterdir():
+-        normalized_path = "/" + child.resolve().relative_to(root).as_posix()
++        try:
++            normalized_path = "/" + child.resolve().relative_to(root).as_posix()
++        except ValueError:
++            if child.is_symlink():
++                report.path_ignored(
++                    child,
++                    "is a symbolic link",
++                )
++                continue
++
++            raise
++
+         if child.is_dir():
+             normalized_path += "/"
+         exclude_match = exclude.search(normalized_path)
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->typing.inner
+black.dont_increase_indentation->functools.wraps
+black.dont_increase_indentation->functools.update_wrapper
+black.gen_python_files_in_dir->unittest.mock.__call__
+black.gen_python_files_in_dir->unittest.mock.__getattr__
+black.gen_python_files_in_dir->pathlib.relative_to
+black.gen_python_files_in_dir->pathlib.is_absolute
+
+# Coverage
+
+Name                  Stmts   Miss  Cover   Missing
+---------------------------------------------------
+black.py               1763   1461    17%   101-102, 105, 109-110, 128-131, 150-157, 168-191, 324-390, 407-433, 453-502, 518-553, 568-589, 605-615, 625-647, 656-664, 676-698, 703-704, 723-727, 731-733, 741-758, 766-767, 908-931, 935, 943, 950-954, 962-967, 971-976, 984-989, 993-998, 1002, 1026-1042, 1050-1059, 1064, 1069, 1074, 1079, 1088, 1095-1104, 1117, 1130, 1138-1143, 1146-1150, 1154-1204, 1208-1226, 1233-1246, 1250-1255, 1259-1271, 1277-1288, 1292, 1306-1316, 1323-1329, 1333, 1337, 1341, 1365-1372, 1375-1447, 1471-1480, 1487-1492, 1496-1533, 1538-1539, 1546-1553, 1569-1574, 1578-1581, 1585-1597, 1601-1612, 1616-1618, 1622, 1626-1627, 1631-1645, 1649-1668, 1685-1906, 1911-1924, 1929-1932, 1943-1946, 1957-2037, 2059-2094, 2105-2113, 2129-2182, 2192-2224, 2238-2320, 2337-2343, 2357-2359, 2371-2425, 2431-2454, 2459-2462, 2477-2486, 2496-2502, 2513-2569, 2581-2617, 2622-2641, 2646, 2656-2670, 2679-2695, 2706-2718, 2723-2724, 2729-2737, 2742-2749, 2762-2781, 2790-2793, 2798-2812, 2822-2842, 2855-2896, 2901-2931, 2949-2962, 2975-2992, 3008-3020, 3024-3025, 3028-3029, 3042-3048, 3055-3077, 3083-3135, 3147-3153, 3163-3172, 3177-3181, 3188-3190, 3195-3212, 3221, 3229-3231, 3236-3239, 3249-3262, 3270-3272, 3286-3312, 3322-3401, 3405, 3413-3423, 3428-3429, 3438-3445, 3452-3460, 3464
+tests/__init__.py         0      0   100%
+tests/test_black.py     909    763    16%   31, 36-54, 59-64, 69-79, 88-89, 93-99, 106-122, 126-130, 133-141, 145-150, 154-159, 162-170, 173-186, 190-195, 199-203, 207-211, 215-219, 222-233, 236-261, 265-269, 273-282, 286-290, 294-298, 302-306, 310-314, 318-322, 326-330, 334-338, 342-346, 350-354, 358-362, 366-370, 374-378, 382-385, 389-393, 397-401, 405-409, 413-417, 420-508, 515-595, 602-685, 692-707, 710-729, 732-749, 756-772, 775-778, 782-798, 801-813, 816-825, 829-848, 851-859, 862-867, 870-872, 875-882, 885-898, 901-905, 909-923, 926-929, 933-948, 951-954, 957-964, 967-975, 978-994, 998-1020, 1023-1027, 1030-1046, 1050-1074, 1077-1081, 1084-1097, 1100-1121, 1124-1142, 1145-1147, 1150-1159, 1162-1163, 1186-1206, 1210
+---------------------------------------------------
+TOTAL                  2672   2224    17%
+

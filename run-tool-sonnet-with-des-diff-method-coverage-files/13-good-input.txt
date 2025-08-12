@@ -1,0 +1,845 @@
+
+# Description
+
+# PR - Support parsing of async generators in non-async functions
+
+This is a new syntax added in python3.7, so black can't verify that reformatting will not change the ast unless black itself is run with 3.7. We'll need to change the error message black gives in this case. @ambv any ideas?
+
+Fixes #125.
+
+# Issue #125 - Can't parse return (i * 2 async for i in arange(n))
+
+Title says all.
+
+
+
+# Diff
+
+diff --git a/blib2to3/pgen2/tokenize.py b/blib2to3/pgen2/tokenize.py
+index 9a7664b..1f51ff0 100644
+--- a/blib2to3/pgen2/tokenize.py
++++ b/blib2to3/pgen2/tokenize.py
+@@ -516,13 +516,14 @@ def generate_tokens(readline):
+                         stashed = tok
+                         continue
+ 
+-                    if token == 'def':
++                    if token in ('def', 'for'):
+                         if (stashed
+                                 and stashed[0] == NAME
+                                 and stashed[1] == 'async'):
+ 
+-                            async_def = True
+-                            async_def_indent = indents[-1]
++                            if token == 'def':
++                                async_def = True
++                                async_def_indent = indents[-1]
+ 
+                             yield (ASYNC, stashed[1],
+                                    stashed[2], stashed[3],
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->typing.inner
+black.dont_increase_indentation->functools.wraps
+black.dont_increase_indentation->functools.update_wrapper
+black.format_str->enum.__and__
+black.format_str->black.lib2to3_parse
+black.format_str->typing.__new__
+black.format_str->enum.__bool__
+black.format_str->black.get_future_imports
+black.format_str->black.normalize_fmt_off
+black.format_str->black.maybe_empty_lines
+black.format_str->black.split_line
+black.format_str->black.is_python36
+black.format_str->black.__str__
+black.format_str->black.visit
+black.format_str->.__init__
+black.lib2to3_parse->blib2to3.pgen2.driver.parse_string
+black.lib2to3_parse->blib2to3.pgen2.tokenize.generate_tokens
+black.lib2to3_parse->blib2to3.pgen2.driver.__init__
+blib2to3.pgen2.driver.__init__->logging.getLogger
+blib2to3.pgen2.driver.parse_string->blib2to3.pgen2.driver.parse_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.__init__
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.parse_tokens->logging.debug
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.driver._partially_consume_prefix
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.addtoken
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.setup
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.pop
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.push
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.shift
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.classify
+blib2to3.pgen2.parse.shift->blib2to3.pytree.convert
+blib2to3.pytree.convert->blib2to3.pytree.__init__
+blib2to3.pytree.convert->blib2to3.pytree.__new__
+blib2to3.pgen2.parse.pop->blib2to3.pytree.convert
+blib2to3.pytree.__init__->blib2to3.pytree.invalidate_sibling_maps
+black.get_future_imports->typing.inner
+black.is_python36->blib2to3.pytree.pre_order
+blib2to3.pytree.pre_order->blib2to3.pytree.pre_order
+black.normalize_fmt_off->black.convert_one_fmt_off_pair
+black.convert_one_fmt_off_pair->blib2to3.pytree.prefix
+black.convert_one_fmt_off_pair->blib2to3.pytree.leaves
+black.convert_one_fmt_off_pair->black.list_comments
+blib2to3.pytree.leaves->blib2to3.pytree.leaves
+black.list_comments->black.make_comment
+black.list_comments->.__init__
+black.visit->black.visit_DEDENT
+black.visit->black.visit_suite
+black.visit->black.visit_simple_stmt
+black.visit->black.visit_stmt
+black.visit->black.visit_ENDMARKER
+black.visit->black.visit_INDENT
+black.visit->black.visit_default
+black.visit->blib2to3.pytree.type_repr
+blib2to3.pytree.type_repr->importlib._bootstrap.parent
+black.visit_default->black.append
+black.visit_default->black.line
+black.visit_default->black.normalize_prefix
+black.visit_default->black.any_open_brackets
+black.visit_default->black.visit_default
+black.visit_default->black.visit
+black.visit_default->black.normalize_numeric_literal
+black.visit_default->black.generate_comments
+black.visit_stmt->black.line
+black.visit_stmt->black.normalize_invisible_parens
+black.visit_stmt->black.visit
+black.normalize_invisible_parens->blib2to3.pytree.prefix
+black.normalize_invisible_parens->black.maybe_make_parens_invisible_in_atom
+blib2to3.pytree.prefix->blib2to3.pytree.changed
+blib2to3.pytree.prefix->blib2to3.pytree.prefix
+black.line->.__init__
+black.line->black.__bool__
+black.generate_comments->blib2to3.pytree.__init__
+black.generate_comments->blib2to3.pytree.prefix
+black.generate_comments->blib2to3.pytree.__new__
+black.generate_comments->black.list_comments
+black.append->black.maybe_remove_trailing_comma
+black.append->black.append_comment
+black.append->black.is_class_paren_empty
+black.append->black.is_complex_subscript
+black.append->blib2to3.pytree.prefix
+black.append->black.mark
+black.append->black.whitespace
+black.append_comment->blib2to3.pytree.prefix
+black.maybe_empty_lines->black._maybe_empty_lines
+black._maybe_empty_lines->black._maybe_empty_lines_for_class_or_def
+black._maybe_empty_lines->black.is_decorator
+black._maybe_empty_lines->black.is_class
+black._maybe_empty_lines->blib2to3.pytree.prefix
+black._maybe_empty_lines->black.is_import
+black._maybe_empty_lines->black.is_def
+black._maybe_empty_lines->black.__bool__
+black.is_decorator->black.__bool__
+black.is_class->black.__bool__
+black.split_line->black.is_comment
+black.split_line->black.__str__
+black.split_line->black.is_line_short_enough
+black.__str__->blib2to3.pytree.__unicode__
+black.__str__->blib2to3.pytree.prefix
+black.__str__->black.__bool__
+black.normalize_prefix->blib2to3.pytree.prefix
+blib2to3.pytree.changed->blib2to3.pytree.changed
+black.mark->black.maybe_decrement_after_lambda_arguments
+black.mark->black.maybe_increment_lambda_arguments
+black.mark->black.is_split_after_delimiter
+black.mark->black.is_split_before_delimiter
+black.mark->black.maybe_increment_for_loop_variable
+black.mark->black.maybe_decrement_after_for_loop_variable
+black.is_split_before_delimiter->black.is_vararg
+black.is_complex_subscript->black.get_open_lsqb
+black.whitespace->blib2to3.pytree.prev_sibling
+black.whitespace->black.preceding_leaf
+blib2to3.pytree.prev_sibling->blib2to3.pytree.update_sibling_maps
+black.preceding_leaf->blib2to3.pytree.prev_sibling
+black.preceding_leaf->blib2to3.pytree.leaves
+black.is_class_paren_empty->black.is_class
+black.is_class_paren_empty->black.__bool__
+black.visit_suite->black.visit_default
+black.visit_INDENT->black.visit_default
+black.visit_INDENT->black.line
+black._maybe_empty_lines_for_class_or_def->black.is_comment
+black._maybe_empty_lines_for_class_or_def->black.is_decorator
+blib2to3.pytree.__unicode__->blib2to3.pytree.prefix
+black.is_line_short_enough->black.contains_standalone_comments
+black.visit_simple_stmt->black.visit_default
+black.visit_simple_stmt->black.line
+black.maybe_make_parens_invisible_in_atom->black.max_delimiter_priority_in_atom
+black.maybe_make_parens_invisible_in_atom->black.is_one_tuple
+black.maybe_make_parens_invisible_in_atom->black.is_yield
+black.maybe_make_parens_invisible_in_atom->black.is_empty_tuple
+black.is_yield->black.is_yield
+black.max_delimiter_priority_in_atom->black.max_delimiter_priority
+black.max_delimiter_priority_in_atom->black.mark
+black.max_delimiter_priority_in_atom->blib2to3.pytree.leaves
+black.max_delimiter_priority_in_atom->.__init__
+black.max_delimiter_priority->black.<genexpr>
+black.normalize_numeric_literal->black.format_float_or_int_string
+black.format_float_or_int_string->black.format_int_string
+black.visit_DEDENT->black.visit_default
+black.visit_DEDENT->black.line
+black.is_import->black.is_import
+black.is_import->black.__bool__
+black.visit_ENDMARKER->black.line
+black.visit_ENDMARKER->black.visit_default
+black.assert_equivalent->typing.inner
+black.assert_equivalent->black._v
+black.assert_equivalent->ast.parse
+black._v->black._v
+black.assert_stable->black.format_str
+
+# Coverage
+
+Name                  Stmts   Miss  Cover   Missing
+---------------------------------------------------
+black.py               1836   1103    40%   101-104, 123-130, 141-164, 297-363, 380-408, 428-485, 502-537, 553-574, 590-600, 628, 643-651, 665, 672-681, 684, 690-691, 728-745, 753-756, 915, 940-944, 975-977, 984-986, 1021, 1040-1049, 1078, 1087-1088, 1120, 1130-1131, 1136-1140, 1151-1194, 1202-1203, 1215-1216, 1223-1236, 1240-1245, 1253-1261, 1277, 1323, 1326-1330, 1340, 1347, 1358, 1361, 1366, 1373, 1376-1388, 1392, 1433, 1441-1444, 1448-1449, 1500, 1508-1513, 1522-1533, 1537-1539, 1543, 1551-1553, 1603, 1620-1626, 1629-1642, 1645-1646, 1649-1650, 1657, 1668, 1680-1681, 1685-1698, 1702-1705, 1712-1722, 1726-1735, 1739, 1742-1747, 1750-1754, 1758-1766, 1771, 1775-1776, 1780-1797, 1800-1809, 1812, 1828-1829, 1832, 1837-1840, 1848-1865, 1877, 1893, 1901, 1911, 1918, 1935, 1938, 1941, 1953, 1965, 1968, 2027, 2048, 2053, 2082-2123, 2133-2165, 2179-2261, 2278-2284, 2298-2300, 2312-2366, 2372-2395, 2437-2443, 2454-2510, 2522, 2524-2533, 2535-2537, 2548-2551, 2562-2567, 2582, 2589-2613, 2637-2672, 2684-2692, 2706-2716, 2733, 2741, 2745, 2755, 2758, 2764, 2770, 2788-2791, 2798-2799, 2804-2812, 2817-2824, 2838, 2843, 2848, 2855-2856, 2865-2868, 2873-2887, 2900-2902, 2906, 2913-2920, 2935-2976, 2984-2996, 3001-3018, 3036-3062, 3075-3092, 3108-3120, 3124-3125, 3128-3129, 3142-3148, 3155-3177, 3193-3194, 3213-3215, 3223-3225, 3234-3235, 3249-3253, 3263-3272, 3277-3281, 3288-3290, 3295-3312, 3321, 3329-3331, 3336-3339, 3349-3362, 3371, 3386-3412, 3422-3501, 3505, 3513-3523, 3528-3529, 3538-3545, 3552-3560, 3574-3582, 3586-3587
+tests/__init__.py         0      0   100%
+tests/test_black.py     967    797    18%   31, 53, 59-64, 69-79, 88-89, 93-99, 108-121, 126-130, 133-141, 145-150, 154-159, 162-172, 175-190, 194-199, 203-207, 211-215, 219-223, 226-237, 240-265, 269-273, 277-286, 290-294, 298-302, 306-310, 314-318, 322-326, 330-334, 338-342, 346-350, 354-358, 362-366, 370-374, 378-382, 386-389, 393-397, 401-404, 408-412, 426-430, 434-438, 442-446, 450-454, 457-545, 552-632, 639-722, 729-748, 751-778, 781-798, 805-821, 824-827, 831-847, 850-862, 865-874, 878-897, 900-908, 911-918, 921-923, 926-933, 936-949, 952-956, 960-974, 977-980, 984-997, 1000-1003, 1006-1013, 1016-1024, 1027-1043, 1047-1069, 1072-1078, 1081-1097, 1101-1125, 1128-1134, 1137-1150, 1153-1174, 1177-1195, 1198-1200, 1203-1212, 1215-1216, 1219-1247, 1250-1269, 1273
+---------------------------------------------------
+TOTAL                  2803   1900    32%
+
+
+# Files
+
+path: output/13/good/blib2to3-pgen2-tokenize.py
+content:
+# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006 Python Software Foundation.
+# All rights reserved.
+
+"""Tokenization help for Python programs.
+
+generate_tokens(readline) is a generator that breaks a stream of
+text into Python tokens.  It accepts a readline-like method which is called
+repeatedly to get the next line of input (or "" for EOF).  It generates
+5-tuples with these members:
+
+    the token type (see token.py)
+    the token (a string)
+    the starting (row, column) indices of the token (a 2-tuple of ints)
+    the ending (row, column) indices of the token (a 2-tuple of ints)
+    the original line (string)
+
+It is designed to match the working of the Python tokenizer exactly, except
+that it produces COMMENT tokens for comments and gives type OP for all
+operators
+
+Older entry points
+    tokenize_loop(readline, tokeneater)
+    tokenize(readline, tokeneater=printtoken)
+are the same, except instead of generating tokens, tokeneater is a callback
+function to which the 5 fields described above are passed as 5 arguments,
+each time a new token is found."""
+
+__author__ = 'Ka-Ping Yee <ping@lfw.org>'
+__credits__ = \
+    'GvR, ESR, Tim Peters, Thomas Wouters, Fred Drake, Skip Montanaro'
+
+import re
+from codecs import BOM_UTF8, lookup
+from blib2to3.pgen2.token import *
+
+from . import token
+__all__ = [x for x in dir(token) if x[0] != '_'] + ["tokenize",
+           "generate_tokens", "untokenize"]
+del token
+
+try:
+    bytes
+except NameError:
+    # Support bytes type in Python <= 2.5, so 2to3 turns itself into
+    # valid Python 3 code.
+    bytes = str
+
+def group(*choices): return '(' + '|'.join(choices) + ')'
+def any(*choices): return group(*choices) + '*'
+def maybe(*choices): return group(*choices) + '?'
+def _combinations(*l):
+    return set(
+        x + y for x in l for y in l + ("",) if x.casefold() != y.casefold()
+    )
+
+Whitespace = r'[ \f\t]*'
+Comment = r'#[^\r\n]*'
+Ignore = Whitespace + any(r'\\\r?\n' + Whitespace) + maybe(Comment)
+Name = r'\w+'  # this is invalid but it's fine because Name comes after Number in all groups
+
+Binnumber = r'0[bB]_?[01]+(?:_[01]+)*'
+Hexnumber = r'0[xX]_?[\da-fA-F]+(?:_[\da-fA-F]+)*[lL]?'
+Octnumber = r'0[oO]?_?[0-7]+(?:_[0-7]+)*[lL]?'
+Decnumber = group(r'[1-9]\d*(?:_\d+)*[lL]?', '0[lL]?')
+Intnumber = group(Binnumber, Hexnumber, Octnumber, Decnumber)
+Exponent = r'[eE][-+]?\d+(?:_\d+)*'
+Pointfloat = group(r'\d+(?:_\d+)*\.(?:\d+(?:_\d+)*)?', r'\.\d+(?:_\d+)*') + maybe(Exponent)
+Expfloat = r'\d+(?:_\d+)*' + Exponent
+Floatnumber = group(Pointfloat, Expfloat)
+Imagnumber = group(r'\d+(?:_\d+)*[jJ]', Floatnumber + r'[jJ]')
+Number = group(Imagnumber, Floatnumber, Intnumber)
+
+# Tail end of ' string.
+Single = r"[^'\\]*(?:\\.[^'\\]*)*'"
+# Tail end of " string.
+Double = r'[^"\\]*(?:\\.[^"\\]*)*"'
+# Tail end of ''' string.
+Single3 = r"[^'\\]*(?:(?:\\.|'(?!''))[^'\\]*)*'''"
+# Tail end of """ string.
+Double3 = r'[^"\\]*(?:(?:\\.|"(?!""))[^"\\]*)*"""'
+_litprefix = r"(?:[uUrRbBfF]|[rR][fFbB]|[fFbBuU][rR])?"
+Triple = group(_litprefix + "'''", _litprefix + '"""')
+# Single-line ' or " string.
+String = group(_litprefix + r"'[^\n'\\]*(?:\\.[^\n'\\]*)*'",
+               _litprefix + r'"[^\n"\\]*(?:\\.[^\n"\\]*)*"')
+
+# Because of leftmost-then-longest match semantics, be sure to put the
+# longest operators first (e.g., if = came before ==, == would get
+# recognized as two instances of =).
+Operator = group(r"\*\*=?", r">>=?", r"<<=?", r"<>", r"!=",
+                 r"//=?", r"->",
+                 r"[+\-*/%&@|^=<>]=?",
+                 r"~")
+
+Bracket = '[][(){}]'
+Special = group(r'\r?\n', r'[:;.,`@]')
+Funny = group(Operator, Bracket, Special)
+
+PlainToken = group(Number, Funny, String, Name)
+Token = Ignore + PlainToken
+
+# First (or only) line of ' or " string.
+ContStr = group(_litprefix + r"'[^\n'\\]*(?:\\.[^\n'\\]*)*" +
+                group("'", r'\\\r?\n'),
+                _litprefix + r'"[^\n"\\]*(?:\\.[^\n"\\]*)*' +
+                group('"', r'\\\r?\n'))
+PseudoExtras = group(r'\\\r?\n', Comment, Triple)
+PseudoToken = Whitespace + group(PseudoExtras, Number, Funny, ContStr, Name)
+
+tokenprog = re.compile(Token, re.UNICODE)
+pseudoprog = re.compile(PseudoToken, re.UNICODE)
+single3prog = re.compile(Single3)
+double3prog = re.compile(Double3)
+
+_strprefixes = (
+    _combinations('r', 'R', 'f', 'F') |
+    _combinations('r', 'R', 'b', 'B') |
+    {'u', 'U', 'ur', 'uR', 'Ur', 'UR'}
+)
+
+endprogs = {"'": re.compile(Single), '"': re.compile(Double),
+            "'''": single3prog, '"""': double3prog,
+            **{f"{prefix}'''": single3prog for prefix in _strprefixes},
+            **{f'{prefix}"""': double3prog for prefix in _strprefixes},
+            **{prefix: None for prefix in _strprefixes}}
+
+triple_quoted = (
+    {"'''", '"""'} |
+    {f"{prefix}'''" for prefix in _strprefixes} |
+    {f'{prefix}"""' for prefix in _strprefixes}
+)
+single_quoted = (
+    {"'", '"'} |
+    {f"{prefix}'" for prefix in _strprefixes} |
+    {f'{prefix}"' for prefix in _strprefixes}
+)
+
+tabsize = 8
+
+class TokenError(Exception): pass
+
+class StopTokenizing(Exception): pass
+
+def printtoken(type, token, xxx_todo_changeme, xxx_todo_changeme1, line): # for testing
+    (srow, scol) = xxx_todo_changeme
+    (erow, ecol) = xxx_todo_changeme1
+    print("%d,%d-%d,%d:\t%s\t%s" % \
+        (srow, scol, erow, ecol, tok_name[type], repr(token)))
+
+def tokenize(readline, tokeneater=printtoken):
+    """
+    The tokenize() function accepts two parameters: one representing the
+    input stream, and one providing an output mechanism for tokenize().
+
+    The first parameter, readline, must be a callable object which provides
+    the same interface as the readline() method of built-in file objects.
+    Each call to the function should return one line of input as a string.
+
+    The second parameter, tokeneater, must also be a callable object. It is
+    called once for each token, with five arguments, corresponding to the
+    tuples generated by generate_tokens().
+    """
+    try:
+        tokenize_loop(readline, tokeneater)
+    except StopTokenizing:
+        pass
+
+# backwards compatible interface
+def tokenize_loop(readline, tokeneater):
+    for token_info in generate_tokens(readline):
+        tokeneater(*token_info)
+
+class Untokenizer:
+
+    def __init__(self):
+        self.tokens = []
+        self.prev_row = 1
+        self.prev_col = 0
+
+    def add_whitespace(self, start):
+        row, col = start
+        assert row <= self.prev_row
+        col_offset = col - self.prev_col
+        if col_offset:
+            self.tokens.append(" " * col_offset)
+
+    def untokenize(self, iterable):
+        for t in iterable:
+            if len(t) == 2:
+                self.compat(t, iterable)
+                break
+            tok_type, token, start, end, line = t
+            self.add_whitespace(start)
+            self.tokens.append(token)
+            self.prev_row, self.prev_col = end
+            if tok_type in (NEWLINE, NL):
+                self.prev_row += 1
+                self.prev_col = 0
+        return "".join(self.tokens)
+
+    def compat(self, token, iterable):
+        startline = False
+        indents = []
+        toks_append = self.tokens.append
+        toknum, tokval = token
+        if toknum in (NAME, NUMBER):
+            tokval += ' '
+        if toknum in (NEWLINE, NL):
+            startline = True
+        for tok in iterable:
+            toknum, tokval = tok[:2]
+
+            if toknum in (NAME, NUMBER, ASYNC, AWAIT):
+                tokval += ' '
+
+            if toknum == INDENT:
+                indents.append(tokval)
+                continue
+            elif toknum == DEDENT:
+                indents.pop()
+                continue
+            elif toknum in (NEWLINE, NL):
+                startline = True
+            elif startline and indents:
+                toks_append(indents[-1])
+                startline = False
+            toks_append(tokval)
+
+cookie_re = re.compile(r'^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)', re.ASCII)
+blank_re = re.compile(br'^[ \t\f]*(?:[#\r\n]|$)', re.ASCII)
+
+def _get_normal_name(orig_enc):
+    """Imitates get_normal_name in tokenizer.c."""
+    # Only care about the first 12 characters.
+    enc = orig_enc[:12].lower().replace("_", "-")
+    if enc == "utf-8" or enc.startswith("utf-8-"):
+        return "utf-8"
+    if enc in ("latin-1", "iso-8859-1", "iso-latin-1") or \
+       enc.startswith(("latin-1-", "iso-8859-1-", "iso-latin-1-")):
+        return "iso-8859-1"
+    return orig_enc
+
+def detect_encoding(readline):
+    """
+    The detect_encoding() function is used to detect the encoding that should
+    be used to decode a Python source file. It requires one argument, readline,
+    in the same way as the tokenize() generator.
+
+    It will call readline a maximum of twice, and return the encoding used
+    (as a string) and a list of any lines (left as bytes) it has read
+    in.
+
+    It detects the encoding from the presence of a utf-8 bom or an encoding
+    cookie as specified in pep-0263. If both a bom and a cookie are present, but
+    disagree, a SyntaxError will be raised. If the encoding cookie is an invalid
+    charset, raise a SyntaxError.  Note that if a utf-8 bom is found,
+    'utf-8-sig' is returned.
+
+    If no encoding is specified, then the default of 'utf-8' will be returned.
+    """
+    bom_found = False
+    encoding = None
+    default = 'utf-8'
+    def read_or_stop():
+        try:
+            return readline()
+        except StopIteration:
+            return bytes()
+
+    def find_cookie(line):
+        try:
+            line_string = line.decode('ascii')
+        except UnicodeDecodeError:
+            return None
+        match = cookie_re.match(line_string)
+        if not match:
+            return None
+        encoding = _get_normal_name(match.group(1))
+        try:
+            codec = lookup(encoding)
+        except LookupError:
+            # This behaviour mimics the Python interpreter
+            raise SyntaxError("unknown encoding: " + encoding)
+
+        if bom_found:
+            if codec.name != 'utf-8':
+                # This behaviour mimics the Python interpreter
+                raise SyntaxError('encoding problem: utf-8')
+            encoding += '-sig'
+        return encoding
+
+    first = read_or_stop()
+    if first.startswith(BOM_UTF8):
+        bom_found = True
+        first = first[3:]
+        default = 'utf-8-sig'
+    if not first:
+        return default, []
+
+    encoding = find_cookie(first)
+    if encoding:
+        return encoding, [first]
+    if not blank_re.match(first):
+        return default, [first]
+
+    second = read_or_stop()
+    if not second:
+        return default, [first]
+
+    encoding = find_cookie(second)
+    if encoding:
+        return encoding, [first, second]
+
+    return default, [first, second]
+
+def untokenize(iterable):
+    """Transform tokens back into Python source code.
+
+    Each element returned by the iterable must be a token sequence
+    with at least two elements, a token number and token value.  If
+    only two tokens are passed, the resulting output is poor.
+
+    Round-trip invariant for full input:
+        Untokenized source will match input source exactly
+
+    Round-trip invariant for limited intput:
+        # Output text will tokenize the back to the input
+        t1 = [tok[:2] for tok in generate_tokens(f.readline)]
+        newcode = untokenize(t1)
+        readline = iter(newcode.splitlines(1)).next
+        t2 = [tok[:2] for tokin generate_tokens(readline)]
+        assert t1 == t2
+    """
+    ut = Untokenizer()
+    return ut.untokenize(iterable)
+
+def generate_tokens(readline):
+    """
+    The generate_tokens() generator requires one argument, readline, which
+    must be a callable object which provides the same interface as the
+    readline() method of built-in file objects. Each call to the function
+    should return one line of input as a string.  Alternately, readline
+    can be a callable function terminating with StopIteration:
+        readline = open(myfile).next    # Example of alternate readline
+
+    The generator produces 5-tuples with these members: the token type; the
+    token string; a 2-tuple (srow, scol) of ints specifying the row and
+    column where the token begins in the source; a 2-tuple (erow, ecol) of
+    ints specifying the row and column where the token ends in the source;
+    and the line on which the token was found. The line passed is the
+    logical line; continuation lines are included.
+    """
+    lnum = parenlev = continued = 0
+    numchars = '0123456789'
+    contstr, needcont = '', 0
+    contline = None
+    indents = [0]
+
+    # 'stashed' and 'async_*' are used for async/await parsing
+    stashed = None
+    async_def = False
+    async_def_indent = 0
+    async_def_nl = False
+
+    while 1:                                   # loop over lines in stream
+        try:
+            line = readline()
+        except StopIteration:
+            line = ''
+        lnum = lnum + 1
+        pos, max = 0, len(line)
+
+        if contstr:                            # continued string
+            if not line:
+                raise TokenError("EOF in multi-line string", strstart)
+            endmatch = endprog.match(line)
+            if endmatch:
+                pos = end = endmatch.end(0)
+                yield (STRING, contstr + line[:end],
+                       strstart, (lnum, end), contline + line)
+                contstr, needcont = '', 0
+                contline = None
+            elif needcont and line[-2:] != '\\\n' and line[-3:] != '\\\r\n':
+                yield (ERRORTOKEN, contstr + line,
+                           strstart, (lnum, len(line)), contline)
+                contstr = ''
+                contline = None
+                continue
+            else:
+                contstr = contstr + line
+                contline = contline + line
+                continue
+
+        elif parenlev == 0 and not continued:  # new statement
+            if not line: break
+            column = 0
+            while pos < max:                   # measure leading whitespace
+                if line[pos] == ' ': column = column + 1
+                elif line[pos] == '\t': column = (column//tabsize + 1)*tabsize
+                elif line[pos] == '\f': column = 0
+                else: break
+                pos = pos + 1
+            if pos == max: break
+
+            if stashed:
+                yield stashed
+                stashed = None
+
+            if line[pos] in '\r\n':            # skip blank lines
+                yield (NL, line[pos:], (lnum, pos), (lnum, len(line)), line)
+                continue
+
+            if line[pos] == '#':               # skip comments
+                comment_token = line[pos:].rstrip('\r\n')
+                nl_pos = pos + len(comment_token)
+                yield (COMMENT, comment_token,
+                        (lnum, pos), (lnum, pos + len(comment_token)), line)
+                yield (NL, line[nl_pos:],
+                        (lnum, nl_pos), (lnum, len(line)), line)
+                continue
+
+            if column > indents[-1]:           # count indents
+                indents.append(column)
+                yield (INDENT, line[:pos], (lnum, 0), (lnum, pos), line)
+
+            while column < indents[-1]:        # count dedents
+                if column not in indents:
+                    raise IndentationError(
+                        "unindent does not match any outer indentation level",
+                        ("<tokenize>", lnum, pos, line))
+                indents = indents[:-1]
+
+                if async_def and async_def_indent >= indents[-1]:
+                    async_def = False
+                    async_def_nl = False
+                    async_def_indent = 0
+
+                yield (DEDENT, '', (lnum, pos), (lnum, pos), line)
+
+            if async_def and async_def_nl and async_def_indent >= indents[-1]:
+                async_def = False
+                async_def_nl = False
+                async_def_indent = 0
+
+        else:                                  # continued statement
+            if not line:
+                raise TokenError("EOF in multi-line statement", (lnum, 0))
+            continued = 0
+
+        while pos < max:
+            pseudomatch = pseudoprog.match(line, pos)
+            if pseudomatch:                                # scan for tokens
+                start, end = pseudomatch.span(1)
+                spos, epos, pos = (lnum, start), (lnum, end), end
+                token, initial = line[start:end], line[start]
+
+                if initial in numchars or \
+                   (initial == '.' and token != '.'):      # ordinary number
+                    yield (NUMBER, token, spos, epos, line)
+                elif initial in '\r\n':
+                    newline = NEWLINE
+                    if parenlev > 0:
+                        newline = NL
+                    elif async_def:
+                        async_def_nl = True
+                    if stashed:
+                        yield stashed
+                        stashed = None
+                    yield (newline, token, spos, epos, line)
+
+                elif initial == '#':
+                    assert not token.endswith("\n")
+                    if stashed:
+                        yield stashed
+                        stashed = None
+                    yield (COMMENT, token, spos, epos, line)
+                elif token in triple_quoted:
+                    endprog = endprogs[token]
+                    endmatch = endprog.match(line, pos)
+                    if endmatch:                           # all on one line
+                        pos = endmatch.end(0)
+                        token = line[start:pos]
+                        if stashed:
+                            yield stashed
+                            stashed = None
+                        yield (STRING, token, spos, (lnum, pos), line)
+                    else:
+                        strstart = (lnum, start)           # multiple lines
+                        contstr = line[start:]
+                        contline = line
+                        break
+                elif initial in single_quoted or \
+                    token[:2] in single_quoted or \
+                    token[:3] in single_quoted:
+                    if token[-1] == '\n':                  # continued string
+                        strstart = (lnum, start)
+                        endprog = (endprogs[initial] or endprogs[token[1]] or
+                                   endprogs[token[2]])
+                        contstr, needcont = line[start:], 1
+                        contline = line
+                        break
+                    else:                                  # ordinary string
+                        if stashed:
+                            yield stashed
+                            stashed = None
+                        yield (STRING, token, spos, epos, line)
+                elif initial.isidentifier():               # ordinary name
+                    if token in ('async', 'await'):
+                        if async_def:
+                            yield (ASYNC if token == 'async' else AWAIT,
+                                   token, spos, epos, line)
+                            continue
+
+                    tok = (NAME, token, spos, epos, line)
+                    if token == 'async' and not stashed:
+                        stashed = tok
+                        continue
+
+                    if token in ('def', 'for'):
+                        if (stashed
+                                and stashed[0] == NAME
+                                and stashed[1] == 'async'):
+
+                            if token == 'def':
+                                async_def = True
+                                async_def_indent = indents[-1]
+
+                            yield (ASYNC, stashed[1],
+                                   stashed[2], stashed[3],
+                                   stashed[4])
+                            stashed = None
+
+                    if stashed:
+                        yield stashed
+                        stashed = None
+
+                    yield tok
+                elif initial == '\\':                      # continued stmt
+                    # This yield is new; needed for better idempotency:
+                    if stashed:
+                        yield stashed
+                        stashed = None
+                    yield (NL, token, spos, (lnum, pos), line)
+                    continued = 1
+                else:
+                    if initial in '([{': parenlev = parenlev + 1
+                    elif initial in ')]}': parenlev = parenlev - 1
+                    if stashed:
+                        yield stashed
+                        stashed = None
+                    yield (OP, token, spos, epos, line)
+            else:
+                yield (ERRORTOKEN, line[pos],
+                           (lnum, pos), (lnum, pos+1), line)
+                pos = pos + 1
+
+    if stashed:
+        yield stashed
+        stashed = None
+
+    for indent in indents[1:]:                 # pop remaining indent levels
+        yield (DEDENT, '', (lnum, 0), (lnum, 0), '')
+    yield (ENDMARKER, '', (lnum, 0), (lnum, 0), '')
+
+if __name__ == '__main__':                     # testing
+    import sys
+    if len(sys.argv) > 1: tokenize(open(sys.argv[1]).readline)
+    else: tokenize(sys.stdin.readline)
+
+
+

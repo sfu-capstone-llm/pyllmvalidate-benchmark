@@ -1,0 +1,561 @@
+
+# Description
+
+# PR
+
+Add support for always tokenizing async/await as keywords
+Fixes #593
+
+I looked into this bug with @ambv and @carljm, and we reached the
+conclusion was that it's not possible for the tokenizer to determine if
+async/await is a keyword inside all possible generators without breaking
+the grammar for older versions of Python.
+
+Instead, we introduce a new tokenizer mode for Python 3.7+ that will
+cause all async/await instances to get parsed as a reserved keyword,
+which should fix async/await inside generators.
+
+# Issue #593 - Black can't parse new Python 3.7 async generator syntax
+
+Operating system: Linux but unlikely to be OS specific
+Python version: 3.7.1
+Black version: 18.9b0
+Does also happen on master: Yes (as of 32eed7d)
+
+The following code (extracted from test_asyncgen.py in CPython) is currently not handled by black:
+
+def make_arange(n):
+    # This syntax is legal starting with Python 3.7
+    return (i * 2 for i in range(n) if await wrap(i))
+Running black on it results in:
+
+error: cannot format test_asyncgen.py: Cannot parse: 3:45:     return (i * 2 for i in range(n) if await wrap(i))
+All done! 💥 💔 💥
+1 file failed to reformat.
+As per the comment, this is new Python 3.7 syntax, so presumably "just" a case of needing to update the parser to reflect the grammar change.
+
+# Diff
+
+diff --git a/black.py b/black.py
+index c96d205..c8aa30b 100644
+--- a/black.py
++++ b/black.py
+@@ -48,6 +48,7 @@ from blib2to3 import pygram, pytree
+ from blib2to3.pgen2 import driver, token
+ from blib2to3.pgen2.grammar import Grammar
+ from blib2to3.pgen2.parse import ParseError
++from blib2to3.pgen2.tokenize import TokenizerConfig
+ 
+ 
+ __version__ = "19.3b0"
+@@ -136,19 +137,28 @@ class Feature(Enum):
+     NUMERIC_UNDERSCORES = 3
+     TRAILING_COMMA_IN_CALL = 4
+     TRAILING_COMMA_IN_DEF = 5
++    # The following two feature-flags are mutually exclusive, and exactly one should be
++    # set for every version of python.
++    ASYNC_IS_VALID_IDENTIFIER = 6
++    ASYNC_IS_RESERVED_KEYWORD = 7
+ 
+ 
+ VERSION_TO_FEATURES: Dict[TargetVersion, Set[Feature]] = {
+-    TargetVersion.PY27: set(),
+-    TargetVersion.PY33: {Feature.UNICODE_LITERALS},
+-    TargetVersion.PY34: {Feature.UNICODE_LITERALS},
+-    TargetVersion.PY35: {Feature.UNICODE_LITERALS, Feature.TRAILING_COMMA_IN_CALL},
++    TargetVersion.PY27: {Feature.ASYNC_IS_VALID_IDENTIFIER},
++    TargetVersion.PY33: {Feature.UNICODE_LITERALS, Feature.ASYNC_IS_VALID_IDENTIFIER},
++    TargetVersion.PY34: {Feature.UNICODE_LITERALS, Feature.ASYNC_IS_VALID_IDENTIFIER},
++    TargetVersion.PY35: {
++        Feature.UNICODE_LITERALS,
++        Feature.TRAILING_COMMA_IN_CALL,
++        Feature.ASYNC_IS_VALID_IDENTIFIER,
++    },
+     TargetVersion.PY36: {
+         Feature.UNICODE_LITERALS,
+         Feature.F_STRINGS,
+         Feature.NUMERIC_UNDERSCORES,
+         Feature.TRAILING_COMMA_IN_CALL,
+         Feature.TRAILING_COMMA_IN_DEF,
++        Feature.ASYNC_IS_VALID_IDENTIFIER,
+     },
+     TargetVersion.PY37: {
+         Feature.UNICODE_LITERALS,
+@@ -156,6 +166,7 @@ VERSION_TO_FEATURES: Dict[TargetVersion, Set[Feature]] = {
+         Feature.NUMERIC_UNDERSCORES,
+         Feature.TRAILING_COMMA_IN_CALL,
+         Feature.TRAILING_COMMA_IN_DEF,
++        Feature.ASYNC_IS_RESERVED_KEYWORD,
+     },
+     TargetVersion.PY38: {
+         Feature.UNICODE_LITERALS,
+@@ -163,6 +174,7 @@ VERSION_TO_FEATURES: Dict[TargetVersion, Set[Feature]] = {
+         Feature.NUMERIC_UNDERSCORES,
+         Feature.TRAILING_COMMA_IN_CALL,
+         Feature.TRAILING_COMMA_IN_DEF,
++        Feature.ASYNC_IS_RESERVED_KEYWORD,
+     },
+ }
+ 
+@@ -748,20 +760,62 @@ def decode_bytes(src: bytes) -> Tuple[FileContent, Encoding, NewLine]:
+         return tiow.read(), encoding, newline
+ 
+ 
+-def get_grammars(target_versions: Set[TargetVersion]) -> List[Grammar]:
++@dataclass(frozen=True)
++class ParserConfig:
++    grammar: Grammar
++    tokenizer_config: TokenizerConfig = TokenizerConfig()
++
++
++def get_parser_configs(target_versions: Set[TargetVersion]) -> List[ParserConfig]:
+     if not target_versions:
+         # No target_version specified, so try all grammars.
+         return [
+-            pygram.python_grammar_no_print_statement_no_exec_statement,
+-            pygram.python_grammar_no_print_statement,
+-            pygram.python_grammar,
++            # Python 3.7+
++            ParserConfig(
++                pygram.python_grammar_no_print_statement_no_exec_statement,
++                TokenizerConfig(async_is_reserved_keyword=True),
++            ),
++            # Python 3.0-3.6
++            ParserConfig(
++                pygram.python_grammar_no_print_statement_no_exec_statement,
++                TokenizerConfig(async_is_reserved_keyword=False),
++            ),
++            # Python 2.7 with future print_function import
++            ParserConfig(pygram.python_grammar_no_print_statement),
++            # Python 2.7
++            ParserConfig(pygram.python_grammar),
+         ]
+     elif all(version.is_python2() for version in target_versions):
+         # Python 2-only code, so try Python 2 grammars.
+-        return [pygram.python_grammar_no_print_statement, pygram.python_grammar]
++        return [
++            # Python 2.7 with future print_function import
++            ParserConfig(pygram.python_grammar_no_print_statement),
++            # Python 2.7
++            ParserConfig(pygram.python_grammar),
++        ]
+     else:
+         # Python 3-compatible code, so only try Python 3 grammar.
+-        return [pygram.python_grammar_no_print_statement_no_exec_statement]
++        configs = []
++        # If we have to parse both, try to parse async as a keyword first
++        if not supports_feature(target_versions, Feature.ASYNC_IS_VALID_IDENTIFIER):
++            # Python 3.7+
++            configs.append(
++                ParserConfig(
++                    pygram.python_grammar_no_print_statement_no_exec_statement,
++                    TokenizerConfig(async_is_reserved_keyword=True),
++                )
++            )
++        if not supports_feature(target_versions, Feature.ASYNC_IS_RESERVED_KEYWORD):
++            # Python 3.0-3.6
++            configs.append(
++                ParserConfig(
++                    pygram.python_grammar_no_print_statement_no_exec_statement,
++                    TokenizerConfig(async_is_reserved_keyword=False),
++                )
++            )
++        # At least one of the above branches must have been taken, because every Python
++        # version has exactly one of the two 'ASYNC_IS_*' flags
++        return configs
+ 
+ 
+ def lib2to3_parse(src_txt: str, target_versions: Iterable[TargetVersion] = ()) -> Node:
+@@ -769,8 +823,12 @@ def lib2to3_parse(src_txt: str, target_versions: Iterable[TargetVersion] = ()) -
+     if src_txt[-1:] != "\n":
+         src_txt += "\n"
+ 
+-    for grammar in get_grammars(set(target_versions)):
+-        drv = driver.Driver(grammar, pytree.convert)
++    for parser_config in get_parser_configs(set(target_versions)):
++        drv = driver.Driver(
++            parser_config.grammar,
++            pytree.convert,
++            tokenizer_config=parser_config.tokenizer_config,
++        )
+         try:
+             result = drv.parse_string(src_txt, True)
+             break
+diff --git a/blib2to3/pgen2/driver.py b/blib2to3/pgen2/driver.py
+index 63b60bb..e681b52 100644
+--- a/blib2to3/pgen2/driver.py
++++ b/blib2to3/pgen2/driver.py
+@@ -29,12 +29,19 @@ from . import grammar, parse, token, tokenize, pgen
+ 
+ class Driver(object):
+ 
+-    def __init__(self, grammar, convert=None, logger=None):
++    def __init__(
++        self,
++        grammar,
++        convert=None,
++        logger=None,
++        tokenizer_config=tokenize.TokenizerConfig(),
++    ):
+         self.grammar = grammar
+         if logger is None:
+             logger = logging.getLogger(__name__)
+         self.logger = logger
+         self.convert = convert
++        self.tokenizer_config = tokenizer_config
+ 
+     def parse_tokens(self, tokens, debug=False):
+         """Parse a series of tokens and return the syntax tree."""
+@@ -97,7 +104,7 @@ class Driver(object):
+ 
+     def parse_stream_raw(self, stream, debug=False):
+         """Parse a stream and return the syntax tree."""
+-        tokens = tokenize.generate_tokens(stream.readline)
++        tokens = tokenize.generate_tokens(stream.readline, config=self.tokenizer_config)
+         return self.parse_tokens(tokens, debug)
+ 
+     def parse_stream(self, stream, debug=False):
+@@ -111,7 +118,10 @@ class Driver(object):
+ 
+     def parse_string(self, text, debug=False):
+         """Parse a string and return the syntax tree."""
+-        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
++        tokens = tokenize.generate_tokens(
++            io.StringIO(text).readline,
++            config=self.tokenizer_config,
++        )
+         return self.parse_tokens(tokens, debug)
+ 
+     def _partially_consume_prefix(self, prefix, column):
+diff --git a/blib2to3/pgen2/tokenize.py b/blib2to3/pgen2/tokenize.py
+index 1f51ff0..43e1d59 100644
+--- a/blib2to3/pgen2/tokenize.py
++++ b/blib2to3/pgen2/tokenize.py
+@@ -31,6 +31,7 @@ __credits__ = \
+ 
+ import re
+ from codecs import BOM_UTF8, lookup
++from attr import dataclass
+ from blib2to3.pgen2.token import *
+ 
+ from . import token
+@@ -137,6 +138,10 @@ single_quoted = (
+ 
+ tabsize = 8
+ 
++@dataclass(frozen=True)
++class TokenizerConfig:
++    async_is_reserved_keyword: bool = False
++
+ class TokenError(Exception): pass
+ 
+ class StopTokenizing(Exception): pass
+@@ -334,7 +339,7 @@ def untokenize(iterable):
+     ut = Untokenizer()
+     return ut.untokenize(iterable)
+ 
+-def generate_tokens(readline):
++def generate_tokens(readline, config: TokenizerConfig = TokenizerConfig()):
+     """
+     The generate_tokens() generator requires one argument, readline, which
+     must be a callable object which provides the same interface as the
+@@ -356,6 +361,9 @@ def generate_tokens(readline):
+     contline = None
+     indents = [0]
+ 
++    # If we know we're parsing 3.7+, we can unconditionally parse `async` and
++    # `await` as keywords.
++    async_is_reserved_keyword = config.async_is_reserved_keyword
+     # 'stashed' and 'async_*' are used for async/await parsing
+     stashed = None
+     async_def = False
+@@ -506,7 +514,7 @@ def generate_tokens(readline):
+                         yield (STRING, token, spos, epos, line)
+                 elif initial.isidentifier():               # ordinary name
+                     if token in ('async', 'await'):
+-                        if async_def:
++                        if async_is_reserved_keyword or async_def:
+                             yield (ASYNC if token == 'async' else AWAIT,
+                                    token, spos, epos, line)
+                             continue
+diff --git a/tests/data/python37.py b/tests/data/python37.py
+index 9781ff6..4401b7b 100644
+--- a/tests/data/python37.py
++++ b/tests/data/python37.py
+@@ -14,6 +14,14 @@ async def func():
+                 self.async_inc, arange(8), batch_size=3
+             )
+         ]
++
++def awaited_generator_value(n):
++    return (await awaitable for awaitable in awaitable_list)
++
++def make_arange(n):
++    return (i * 2 for i in range(n) if await wrap(i))
++
++
+ # output
+ 
+ 
+@@ -39,3 +47,11 @@ async def func():
+                 self.async_inc, arange(8), batch_size=3
+             )
+         ]
++
++
++def awaited_generator_value(n):
++    return (await awaitable for awaitable in awaitable_list)
++
++
++def make_arange(n):
++    return (i * 2 for i in range(n) if await wrap(i))
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.load
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver._newer->genericpath.getmtime
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->typing.inner
+black.dont_increase_indentation->functools.wraps
+black.dont_increase_indentation->functools.update_wrapper
+black.format_str->enum.__hash__
+black.format_str->black.<setcomp>
+black.format_str->black.lib2to3_parse
+black.format_str->black.detect_target_versions
+black.format_str->black.supports_feature
+black.format_str->black.maybe_empty_lines
+black.format_str->black.__str__
+black.format_str->typing.__new__
+black.format_str->black.split_line
+black.format_str->.__init__
+black.format_str->black.visit
+black.format_str->black.normalize_fmt_off
+black.format_str->black.get_future_imports
+black.lib2to3_parse->blib2to3.pgen2.driver.__init__
+black.lib2to3_parse->blib2to3.pgen2.tokenize.generate_tokens
+black.lib2to3_parse->black.get_parser_configs
+black.lib2to3_parse->blib2to3.pgen2.driver.parse_string
+black.get_parser_configs->black.supports_feature
+black.get_parser_configs->.__init__
+black.get_parser_configs->black.<genexpr>
+blib2to3.pgen2.driver.__init__->logging.getLogger
+blib2to3.pgen2.driver.parse_string->blib2to3.pgen2.driver.parse_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.driver._partially_consume_prefix
+blib2to3.pgen2.driver.parse_tokens->logging.debug
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.setup
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.__init__
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.addtoken
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.pop
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.classify
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.shift
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.push
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.__init__
+blib2to3.pgen2.parse.shift->blib2to3.pytree.convert
+blib2to3.pytree.convert->blib2to3.pytree.__new__
+blib2to3.pytree.convert->blib2to3.pytree.__init__
+blib2to3.pgen2.parse.pop->blib2to3.pytree.convert
+blib2to3.pytree.__init__->blib2to3.pytree.invalidate_sibling_maps
+black.get_future_imports->typing.inner
+black.detect_target_versions->enum.__iter__
+black.detect_target_versions->black.get_features_used
+black.detect_target_versions->black.<setcomp>
+black.get_features_used->blib2to3.pytree.pre_order
+blib2to3.pytree.pre_order->blib2to3.pytree.pre_order
+black.normalize_fmt_off->black.convert_one_fmt_off_pair
+black.convert_one_fmt_off_pair->blib2to3.pytree.prefix
+black.convert_one_fmt_off_pair->blib2to3.pytree.leaves
+black.convert_one_fmt_off_pair->black.list_comments
+blib2to3.pytree.leaves->blib2to3.pytree.leaves
+black.supports_feature->black.<genexpr>
+black.visit->black.visit_default
+black.visit->black.visit_suite
+black.visit->blib2to3.pytree.type_repr
+black.visit->black.visit_DEDENT
+black.visit->black.visit_ENDMARKER
+black.visit->black.visit_async_stmt
+black.visit->black.visit_INDENT
+black.visit->black.visit_stmt
+black.visit->black.visit_simple_stmt
+blib2to3.pytree.type_repr->importlib._bootstrap.parent
+black.visit_default->black.visit_default
+black.visit_default->black.normalize_prefix
+black.visit_default->black.any_open_brackets
+black.visit_default->black.visit
+black.visit_default->black.append
+black.visit_default->black.generate_comments
+black.visit_stmt->black.line
+black.visit_stmt->black.normalize_invisible_parens
+black.visit_stmt->black.visit
+black.normalize_invisible_parens->black.is_one_tuple
+black.normalize_invisible_parens->blib2to3.pytree.__new__
+black.normalize_invisible_parens->blib2to3.pytree.remove
+black.normalize_invisible_parens->blib2to3.pytree.__init__
+black.normalize_invisible_parens->blib2to3.pytree.prefix
+black.normalize_invisible_parens->blib2to3.pytree.insert_child
+blib2to3.pytree.prefix->blib2to3.pytree.prefix
+blib2to3.pytree.prefix->blib2to3.pytree.changed
+black.line->black.__bool__
+black.line->.__init__
+black.generate_comments->blib2to3.pytree.prefix
+black.generate_comments->black.list_comments
+black.normalize_prefix->blib2to3.pytree.prefix
+blib2to3.pytree.changed->blib2to3.pytree.changed
+black.append->black.is_class_paren_empty
+black.append->blib2to3.pytree.prefix
+black.append->black.is_complex_subscript
+black.append->black.maybe_remove_trailing_comma
+black.append->black.whitespace
+black.append->black.mark
+black.append->black.append_comment
+black.mark->black.maybe_decrement_after_lambda_arguments
+black.mark->black.is_split_before_delimiter
+black.mark->black.maybe_decrement_after_for_loop_variable
+black.mark->black.is_split_after_delimiter
+black.mark->black.maybe_increment_for_loop_variable
+black.mark->black.maybe_increment_lambda_arguments
+black.is_split_before_delimiter->black.is_vararg
+black.is_split_before_delimiter->blib2to3.pytree.prev_sibling
+black.is_complex_subscript->black.get_open_lsqb
+black.whitespace->black.preceding_leaf
+black.whitespace->blib2to3.pytree.prev_sibling
+blib2to3.pytree.prev_sibling->blib2to3.pytree.update_sibling_maps
+black.preceding_leaf->blib2to3.pytree.prev_sibling
+black.is_class_paren_empty->black.__bool__
+black.is_class_paren_empty->black.is_class
+black.is_class->black.__bool__
+black.visit_suite->black.visit_default
+black.visit_INDENT->black.visit_default
+black.visit_INDENT->black.line
+black.maybe_empty_lines->black._maybe_empty_lines
+black._maybe_empty_lines->black.is_decorator
+black._maybe_empty_lines->blib2to3.pytree.prefix
+black._maybe_empty_lines->black.is_import
+black._maybe_empty_lines->black.is_def
+black._maybe_empty_lines->black.__bool__
+black._maybe_empty_lines->black._maybe_empty_lines_for_class_or_def
+black._maybe_empty_lines->black.is_class
+black.is_decorator->black.__bool__
+black._maybe_empty_lines_for_class_or_def->black.is_comment
+black._maybe_empty_lines_for_class_or_def->black.is_decorator
+black.split_line->black.is_comment
+black.split_line->black.contains_inner_type_comments
+black.split_line->black.is_line_short_enough
+black.split_line->black.__str__
+black.__str__->blib2to3.pytree.prefix
+black.__str__->click.termui.style
+black.__str__->black.__bool__
+black.__str__->blib2to3.pytree.__unicode__
+blib2to3.pytree.__unicode__->blib2to3.pytree.prefix
+black.is_line_short_enough->black.contains_standalone_comments
+black.visit_simple_stmt->black.visit_default
+black.visit_simple_stmt->black.line
+black.visit_DEDENT->black.visit_default
+black.visit_DEDENT->black.line
+black.is_import->black.__bool__
+black.is_import->black.is_import
+blib2to3.pytree.remove->blib2to3.pytree.invalidate_sibling_maps
+blib2to3.pytree.remove->blib2to3.pytree.changed
+blib2to3.pytree.insert_child->blib2to3.pytree.invalidate_sibling_maps
+blib2to3.pytree.insert_child->blib2to3.pytree.changed
+black.visit_async_stmt->black.line
+black.visit_async_stmt->black.visit
+black.visit_ENDMARKER->black.visit_default
+black.visit_ENDMARKER->black.line
+black.assert_stable->black.format_str
+black.read_pyproject_toml->toml.decoder.load
+black.main->pathlib.is_file
+black.main->pathlib.is_dir
+black.main->enum.__hash__
+black.main->pathlib.__new__
+black.main->black.from_configuration
+black.main->black.find_project_root
+black.main->black.reformat_one
+black.main->click.core.exit
+black.main->pathlib.__hash__
+black.main->black.__str__
+black.main->black.re_compile_maybe_verbose
+black.main->.__init__
+black.main->black.return_code
+black.main->click.termui.secho
+black.re_compile_maybe_verbose->re.compile
+black.find_project_root->pathlib.is_file
+black.find_project_root->pathlib.is_dir
+black.find_project_root->black.<genexpr>
+black.find_project_root->collections.abc.__iter__
+black.find_project_root->pathlib.parents
+black.find_project_root->pathlib.__truediv__
+black.reformat_one->pathlib.__eq__
+black.reformat_one->pathlib.is_file
+black.reformat_one->black.failed
+black.reformat_one->pathlib.__hash__
+black.reformat_one->black.done
+black.reformat_one->black.read_cache
+black.reformat_one->black.get_cache_info
+black.reformat_one->pathlib.resolve
+black.reformat_one->black.format_file_in_place
+black.read_cache->pathlib.open
+black.read_cache->pathlib.exists
+black.read_cache->black.get_cache_file
+black.read_cache->pathlib.__new__
+black.read_cache->pathlib.__hash__
+black.get_cache_file->black.get_cache_key
+black.get_cache_file->pathlib.__truediv__
+black.get_cache_key->black.<lambda>
+black.get_cache_key->black.<genexpr>
+black.get_cache_info->pathlib.stat
+black.format_file_in_place->black.format_file_contents
+black.format_file_in_place->black.decode_bytes
+black.format_file_in_place->pathlib.stat
+black.format_file_in_place->pathlib.suffix
+black.format_file_in_place->pathlib.__fspath__
+black.decode_bytes->codecs.__init__
+black.decode_bytes->tokenize.detect_encoding
+black.decode_bytes->codecs.decode
+black.format_file_contents->black.format_str
+black.failed->click.termui.secho
+black.failed->pathlib.__str__
+
+# Coverage
+
+Name                  Stmts   Miss  Cover   Missing
+---------------------------------------------------
+black.py               1940   1071    45%   106, 196, 220-225, 230-231, 238-243, 394-395, 398-406, 414, 416-417, 420-422, 425-427, 434, 441, 443-445, 456, 479-480, 487, 491, 509-528, 547-599, 616, 626-648, 660-681, 694, 700-703, 735, 755, 790, 824, 841-842, 848, 854-855, 892-909, 917-920, 1061, 1073, 1077, 1095, 1102-1106, 1115-1117, 1129-1131, 1192, 1211-1220, 1249, 1258-1259, 1291, 1301-1302, 1314-1317, 1320-1325, 1330-1334, 1345-1388, 1396-1397, 1402-1408, 1412, 1416-1418, 1428-1436, 1452, 1498, 1503, 1515, 1522, 1536, 1541, 1551-1563, 1567, 1607, 1610-1611, 1622-1623, 1625, 1674, 1682-1687, 1711-1713, 1717, 1725-1727, 1778, 1795-1801, 1811, 1817, 1820-1821, 1824-1825, 1832, 1843, 1846, 1855-1856, 1860-1873, 1877-1880, 1887-1897, 1901-1910, 1914, 1917-1922, 1925-1929, 1933-1941, 1946, 1950-1951, 1955-1972, 1975-1984, 1987, 2000-2007, 2012-2015, 2023-2040, 2052, 2068, 2076, 2083, 2086, 2093, 2115, 2118, 2121, 2133, 2145, 2148, 2218-2219, 2222, 2245, 2250, 2284-2327, 2337-2363, 2380-2452, 2469-2475, 2489-2514, 2525-2527, 2539-2599, 2607-2630, 2650-2652, 2680-2686, 2697-2753, 2762-2789, 2794-2798, 2813, 2823, 2827-2831, 2834-2837, 2841-2849, 2884-2919, 2931-2939, 2948-2967, 2972, 2983-2994, 3005-3021, 3035-3044, 3049-3050, 3055-3063, 3068-3075, 3088-3107, 3116-3119, 3125-3139, 3153-3155, 3158-3159, 3166-3178, 3201-3238, 3246-3258, 3263-3280, 3298-3324, 3338, 3343, 3349, 3352-3354, 3371-3374, 3377-3381, 3390-3391, 3408, 3418-3420, 3427-3428, 3443-3449, 3455-3521, 3533-3537, 3547-3556, 3561-3565, 3572-3574, 3579-3600, 3609, 3618, 3624-3627, 3637-3650, 3659, 3674-3700, 3710-3789, 3805-3811, 3826-3833, 3845-3846, 3860-3868, 3872-3874, 3878
+blackd.py               100     71    29%   42-46, 50-64, 68-121, 125-152, 156-158, 162
+tests/__init__.py         0      0   100%
+tests/test_black.py    1208    952    21%   36-37, 54, 76, 82-87, 92-102, 109, 145-158, 172-176, 179-187, 191-196, 200-205, 208-217, 220-240, 244-249, 253-257, 261-265, 269-273, 276-287, 290-312, 316-320, 324-333, 337-341, 345-349, 353-357, 361-365, 369-373, 377-381, 385-389, 393-397, 401-405, 409-413, 417-421, 425-429, 433-437, 441-445, 449-454, 458-463, 467-470, 474-478, 482-487, 491-495, 499-503, 513, 522-533, 537-541, 545-549, 553-557, 561-565, 569-573, 577-581, 584-603, 606-694, 701-781, 788-871, 878-900, 903-931, 934-961, 964-981, 988-1005, 1008-1011, 1015-1031, 1034-1045, 1048-1056, 1060-1078, 1081-1088, 1091-1098, 1101-1103, 1106-1113, 1116-1129, 1132-1136, 1140-1153, 1156-1159, 1163-1171, 1174-1176, 1179-1185, 1188-1197, 1200-1215, 1219-1240, 1243-1249, 1252-1267, 1271-1292, 1295-1303, 1306-1319, 1322-1343, 1346-1364, 1367-1368, 1371-1380, 1383-1393, 1396-1397, 1400-1428, 1431-1450, 1453-1465, 1470-1475, 1480-1484, 1489-1494, 1502-1507, 1512-1517, 1522-1541, 1546-1553, 1558-1585, 1590-1595, 1600-1607, 1611-1615, 1619
+---------------------------------------------------
+TOTAL                  3248   2094    36%
+RUN EVERY COMMAND
+1
+python -m unittest -q tests.test_black.BlackTestCase.test_python37
+----------------------------------------------------------------------
+Ran 1 test in 0.046s
+
+OK
+Name                  Stmts   Miss  Cover   Missing
+---------------------------------------------------
+black.py               1940    816    58%   106, 196, 220-225, 230-231, 238-243, 394-395, 398-406, 414, 416-417, 420-422, 425-427, 434, 441, 443-445, 456, 479-480, 487, 509-528, 547-599, 616, 624, 629-647, 660-681, 694, 698, 735, 755, 790, 824, 841-842, 848, 854-855, 892-909, 917-920, 1102-1106, 1142-1144, 1155-1157, 1192, 1213, 1216, 1249, 1258-1259, 1291, 1301-1302, 1314-1317, 1320-1325, 1330-1334, 1345-1388, 1396-1397, 1407-1408, 1416-1418, 1434-1436, 1452, 1498, 1503, 1515, 1522, 1533, 1536, 1541, 1548, 1551-1563, 1567, 1607, 1622-1623, 1674, 1682-1687, 1711-1713, 1717, 1725-1727, 1778, 1795-1801, 1811, 1817, 1820-1821, 1824-1825, 1832, 1843, 1855-1856, 1860-1873, 1877-1880, 1893-1894, 1907, 1914, 1917-1922, 1925-1929, 1933-1941, 1946, 1950-1951, 1955-1972, 1975-1984, 1987, 2003-2004, 2007, 2012-2015, 2023-2040, 2068, 2076, 2086, 2093, 2118, 2121, 2133, 2145, 2148, 2218-2219, 2245, 2250, 2285, 2298, 2312, 2327, 2337-2363, 2400, 2431-2441, 2471-2475, 2499-2506, 2511, 2541-2542, 2551-2552, 2563-2567, 2573, 2578, 2582, 2598, 2610-2630, 2650-2652, 2680-2686, 2697-2753, 2765, 2768-2769, 2771-2779, 2781-2786, 2797-2798, 2813, 2823, 2834-2837, 2841-2849, 2884-2919, 2931-2939, 2961-2965, 2984, 3006, 3009, 3015, 3039-3042, 3055-3063, 3068-3075, 3089, 3099, 3106-3107, 3153-3155, 3159, 3166-3178, 3204-3238, 3246-3258, 3263-3280, 3298-3324, 3338, 3343, 3349, 3352-3354, 3376-3382, 3390-3391, 3408, 3418-3420, 3432-3433, 3446-3449, 3464, 3468, 3472-3473, 3486-3487, 3501-3502, 3509-3511, 3520-3521, 3533-3537, 3547-3556, 3561-3565, 3572-3574, 3579-3600, 3609, 3618, 3624-3627, 3637-3650, 3674-3700, 3715-3789, 3808-3809, 3826-3833, 3845-3846, 3860-3868, 3872-3874, 3878
+blackd.py               100     71    29%   42-46, 50-64, 68-121, 125-152, 156-158, 162
+tests/__init__.py         0      0   100%
+tests/test_black.py    1208    951    21%   36-37, 54, 76, 82-87, 92-102, 109, 145-158, 172-176, 179-187, 191-196, 200-205, 208-217, 220-240, 244-249, 253-257, 261-265, 269-273, 276-287, 290-312, 316-320, 324-333, 337-341, 345-349, 353-357, 361-365, 369-373, 377-381, 385-389, 393-397, 401-405, 409-413, 417-421, 425-429, 433-437, 441-445, 449-454, 458-463, 467-470, 474-478, 482-487, 491-495, 499-503, 507-518, 537-541, 545-549, 553-557, 561-565, 569-573, 577-581, 584-603, 606-694, 701-781, 788-871, 878-900, 903-931, 934-961, 964-981, 988-1005, 1008-1011, 1015-1031, 1034-1045, 1048-1056, 1060-1078, 1081-1088, 1091-1098, 1101-1103, 1106-1113, 1116-1129, 1132-1136, 1140-1153, 1156-1159, 1163-1171, 1174-1176, 1179-1185, 1188-1197, 1200-1215, 1219-1240, 1243-1249, 1252-1267, 1271-1292, 1295-1303, 1306-1319, 1322-1343, 1346-1364, 1367-1368, 1371-1380, 1383-1393, 1396-1397, 1400-1428, 1431-1450, 1453-1465, 1470-1475, 1480-1484, 1489-1494, 1502-1507, 1512-1517, 1522-1541, 1546-1553, 1558-1585, 1590-1595, 1600-1607, 1611-1615, 1619
+---------------------------------------------------
+TOTAL                  3248   1838    43%
+

@@ -1,0 +1,111 @@
+
+# Description
+
+# PR - Fix trailing comma for function with one arg (#880)
+
+Modified maybe_remove_trailing_comma to remove trailing commas for typedarglists (in addition to arglists), and updated line split logic to ensure that all lines in a function definition that contain only one arg have a trailing comma.
+
+Some discussion points:
+
+There are likely some edge cases to consider with the use of no_commas. Would be great to hear any other suggestions for this test.
+The new test data file should probably be folded into one of the existing function test files, are there any guidelines around this?
+It looks like this will clash with Pull request tweak collection literals to explode with trailing comma #826.
+
+# Issue #880 - Trailing comma for function with one arg
+
+A function with one argument keeps the trailing comma but if there are two it is stripped.
+
+In:
+
+def one(
+    a,
+):
+    pass
+
+def two(
+    a,
+    b,
+):
+    pass
+Out
+
+def one(a,):
+    pass
+
+
+def two(a, b):
+    pass
+From https://black.now.sh/?version=stable&state=_Td6WFoAAATm1rRGAgAhARYAAAB0L-Wj4ACGAFNdAD2IimZxl1N_WlbvK5V-4TOOTwYyJEleH-JCdis69M0BXQy1O1PWCxUpRscYAufHo8BjrjIj1dM6YL_cyWPemFXxt1cpBhl0f8lWpI3sZ5u99cYAAACFuqAGuJSBnwABb4cBAAAAtWKNgbHEZ_sCAAAAAARZWg==
+
+# Diff
+
+diff --git a/black.py b/black.py
+index 635eba2..8318674 100644
+--- a/black.py
++++ b/black.py
+@@ -1352,7 +1352,10 @@ class Line:
+             bracket_depth = leaf.bracket_depth
+             if bracket_depth == depth and leaf.type == token.COMMA:
+                 commas += 1
+-                if leaf.parent and leaf.parent.type == syms.arglist:
++                if leaf.parent and leaf.parent.type in {
++                    syms.arglist,
++                    syms.typedargslist,
++                }:
+                     commas += 1
+                     break
+ 
+@@ -2488,9 +2491,13 @@ def bracket_split_build_line(
+         if leaves:
+             # Since body is a new indent level, remove spurious leading whitespace.
+             normalize_prefix(leaves[0], inside_brackets=True)
+-            # Ensure a trailing comma for imports, but be careful not to add one after
+-            # any comments.
+-            if original.is_import:
++            # Ensure a trailing comma for imports and standalone function arguments, but
++            # be careful not to add one after any comments.
++            no_commas = original.is_def and not any(
++                l.type == token.COMMA for l in leaves
++            )
++
++            if original.is_import and not no_commas:
+                 for i in range(len(leaves) - 1, -1, -1):
+                     if leaves[i].type == STANDALONE_COMMENT:
+                         continue
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.load
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.driver._newer->genericpath.getmtime
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->functools.update_wrapper
+black.dont_increase_indentation->typing.inner
+black.dont_increase_indentation->functools.wraps
+
+# Coverage
+
+Name                  Stmts   Miss  Cover   Missing
+---------------------------------------------------
+black.py               1939   1600    17%   105-108, 127, 190-203, 207, 218-243, 391-463, 474-496, 507-526, 545-597, 613-646, 658-679, 691-701, 710-742, 751-759, 763-797, 802-824, 829-830, 849-853, 857-859, 867-884, 892-895, 1035-1058, 1062, 1070, 1077-1081, 1089-1094, 1098-1108, 1116-1121, 1125-1134, 1138, 1162-1178, 1186-1195, 1200, 1205, 1210, 1215, 1224, 1231-1240, 1253, 1266, 1274-1278, 1281-1302, 1305-1309, 1313-1366, 1370-1386, 1390, 1394-1396, 1402-1414, 1420-1431, 1435, 1459-1463, 1466-1502, 1507-1546, 1570-1576, 1580-1606, 1612-1626, 1631-1632, 1639-1646, 1662-1667, 1671-1674, 1678-1690, 1694-1705, 1709-1711, 1715, 1719-1720, 1723-1725, 1729-1749, 1766-1987, 1992-2005, 2010-2013, 2021-2038, 2049-2052, 2063-2148, 2174-2175, 2199-2230, 2241-2249, 2267-2325, 2335-2361, 2378-2450, 2467-2473, 2487-2516, 2527-2529, 2541-2601, 2609-2632, 2637-2640, 2652-2654, 2663-2672, 2682-2688, 2699-2763, 2772-2799, 2804-2808, 2820-2872, 2877-2879, 2887-2933, 2941-2949, 2958-2977, 2982, 2992-3006, 3015-3031, 3042-3054, 3059-3060, 3065-3073, 3078-3085, 3098-3117, 3126-3129, 3135-3149, 3160-3190, 3195-3196, 3211-3248, 3253-3291, 3308-3334, 3347-3364, 3380-3392, 3396-3397, 3400-3401, 3414-3420, 3427-3449, 3453-3459, 3465-3529, 3539-3545, 3555-3562, 3567-3571, 3578-3580, 3585-3606, 3615, 3623-3625, 3630-3633, 3643-3655, 3663-3665, 3679-3705, 3715-3794, 3798, 3806-3816, 3821-3822, 3831-3838, 3843-3851, 3865-3873, 3877-3879, 3883
+blackd.py               100     71    29%   42-46, 50-64, 68-121, 125-152, 156-158, 162
+tests/__init__.py         0      0   100%
+tests/test_black.py    1222   1000    18%   36-37, 54, 65-77, 82-87, 92-102, 109, 120-124, 128-136, 143-159, 164-168, 172-176, 179-187, 191-196, 200-205, 208-217, 220-240, 244-249, 253-257, 261-265, 270-273, 277-281, 284-295, 298-320, 324-328, 332-341, 345-349, 353-357, 361-365, 369-373, 377-381, 385-389, 393-397, 401-405, 409-413, 417-421, 425-429, 433-437, 441-445, 449-453, 457-461, 465-470, 474-479, 483-486, 490-494, 498-503, 507-511, 515-519, 523-534, 538-549, 553-557, 561-565, 569-573, 577-581, 585-589, 593-597, 600-619, 622-710, 717-797, 804-887, 894-916, 919-947, 950-977, 980-997, 1004-1021, 1024-1027, 1031-1047, 1050-1061, 1064-1072, 1076-1094, 1097-1104, 1107-1114, 1117-1119, 1122-1129, 1132-1145, 1148-1152, 1156-1169, 1172-1175, 1179-1187, 1190-1192, 1195-1201, 1204-1213, 1216-1231, 1235-1256, 1259-1265, 1268-1283, 1287-1308, 1311-1319, 1322-1335, 1338-1359, 1362-1380, 1383-1384, 1387-1396, 1399-1409, 1412-1413, 1416-1444, 1447-1466, 1469-1481, 1486-1491, 1496-1500, 1505-1510, 1518-1523, 1528-1533, 1538-1557, 1562-1569, 1574-1601, 1606-1611, 1616-1623, 1627-1631, 1635
+---------------------------------------------------
+TOTAL                  3261   2671    18%
+

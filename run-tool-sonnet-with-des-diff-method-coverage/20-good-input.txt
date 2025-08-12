@@ -1,0 +1,295 @@
+
+# Description
+
+# PR
+
+Show full path on diffs
+Fixes #130
+
+# Issue #130 - --diff doesn't display full file path
+
+Operating system: Ubuntu 16.04.4
+Python version: 3.6.3
+Black version: 18.4a2
+Does also happen on master: I believe so
+
+Doing black --diff path/to/foo.py results in:
+
+--- foo.py  (original)
++++ foo.py  (formatted)
+@@ -39,24 +39,21 @@
+...
+caused by the following two lines:
+
+https://github.com/ambv/black/blob/f294cc272c3aa5b8d3cd35b9f9283721b7e458d8/black.py#L298-L299
+
+IMO, Black should print the full path to each file it formats in --diff output to be consistent with the behaviour of other diff-producing programs. Not printing the full path also makes it hard to read several concatenated diffs (especially when filenames are duplicated in different directories).
+
+
+
+# Diff
+
+diff --git a/black.py b/black.py
+index dd2e2d1..eafc9e7 100644
+--- a/black.py
++++ b/black.py
+@@ -341,8 +341,8 @@ def format_file_in_place(
+         with open(src, "w", encoding=src_buffer.encoding) as f:
+             f.write(dst_contents)
+     elif write_back == write_back.DIFF:
+-        src_name = f"{src.name}  (original)"
+-        dst_name = f"{src.name}  (formatted)"
++        src_name = f"{src}  (original)"
++        dst_name = f"{src}  (formatted)"
+         diff_contents = diff(src_contents, dst_contents, src_name, dst_name)
+         if lock:
+             lock.acquire()
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->functools.update_wrapper
+black.dont_increase_indentation->functools.wraps
+black.dont_increase_indentation->typing.inner
+black.dump_to_file->tempfile.__exit__
+black.dump_to_file->tempfile.func_wrapper
+black.dump_to_file->tempfile.NamedTemporaryFile
+black.dump_to_file->tempfile.__getattr__
+black.dump_to_file->tempfile.__enter__
+black.format_file_in_place->tokenize.open
+black.format_file_in_place->black.diff
+black.format_file_in_place->black.format_file_contents
+black.format_file_in_place->codecs.decode
+black.format_file_in_place->pathlib.__str__
+black.format_file_contents->black.format_str
+black.format_str->black.visit
+black.format_str->black.__str__
+black.format_str->black.lib2to3_parse
+black.format_str->black.is_python36
+black.format_str->black.split_line
+black.format_str->.__init__
+black.format_str->black.maybe_empty_lines
+black.format_str->typing.__new__
+black.lib2to3_parse->blib2to3.pgen2.driver.parse_string
+black.lib2to3_parse->blib2to3.pgen2.driver.__init__
+black.lib2to3_parse->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.__init__->logging.getLogger
+blib2to3.pgen2.driver.parse_string->blib2to3.pgen2.driver.parse_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.__init__
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.setup
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.addtoken
+blib2to3.pgen2.driver.parse_tokens->logging.debug
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.classify
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.pop
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.shift
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.push
+blib2to3.pgen2.parse.shift->blib2to3.pytree.convert
+blib2to3.pytree.convert->blib2to3.pytree.__new__
+blib2to3.pytree.convert->blib2to3.pytree.__init__
+blib2to3.pgen2.parse.pop->blib2to3.pytree.convert
+black.is_python36->blib2to3.pytree.pre_order
+blib2to3.pytree.pre_order->blib2to3.pytree.pre_order
+black.visit->black.visit_default
+black.visit->black.visit_stmt
+black.visit->black.visit_INDENT
+black.visit->black.visit_DEDENT
+black.visit->black.visit
+black.visit->black.visit_ENDMARKER
+black.visit->black.visit_async_stmt
+black.visit->black.visit_simple_stmt
+black.visit->blib2to3.pytree.type_repr
+blib2to3.pytree.type_repr->importlib._bootstrap.parent
+black.visit_default->black.visit_default
+black.visit_default->black.any_open_brackets
+black.visit_default->black.visit
+black.visit_default->black.generate_comments
+black.visit_default->black.normalize_string_quotes
+black.visit_default->black.normalize_prefix
+black.visit_default->black.append
+black.visit_default->black.line
+black.visit_simple_stmt->black.visit_default
+black.visit_simple_stmt->black.line
+black.line->.__init__
+black.line->black.__bool__
+black.generate_comments->blib2to3.pytree.__new__
+black.generate_comments->black.make_comment
+black.generate_comments->blib2to3.pytree.prefix
+black.generate_comments->blib2to3.pytree.__init__
+black.normalize_prefix->blib2to3.pytree.prefix
+blib2to3.pytree.prefix->blib2to3.pytree.changed
+blib2to3.pytree.changed->blib2to3.pytree.changed
+black.append->black.mark
+black.append->black.append_comment
+black.append->black.whitespace
+black.append->blib2to3.pytree.prefix
+black.append->black.maybe_remove_trailing_comma
+black.mark->black.maybe_decrement_after_for_loop_variable
+black.mark->black.maybe_decrement_after_lambda_arguments
+black.mark->black.is_split_before_delimiter
+black.mark->black.maybe_increment_lambda_arguments
+black.mark->black.is_split_after_delimiter
+black.mark->black.maybe_increment_for_loop_variable
+black.is_split_before_delimiter->black.is_vararg
+black.whitespace->black.preceding_leaf
+black.whitespace->blib2to3.pytree.prev_sibling
+black.whitespace->black.is_vararg
+black.maybe_empty_lines->black._maybe_empty_lines
+black._maybe_empty_lines->black.is_def
+black._maybe_empty_lines->black.is_decorator
+black._maybe_empty_lines->black.is_flow_control
+black._maybe_empty_lines->black.is_import
+black._maybe_empty_lines->blib2to3.pytree.prefix
+black._maybe_empty_lines->black.__bool__
+black._maybe_empty_lines->black.is_class
+black._maybe_empty_lines->black.is_yield
+black.is_decorator->black.__bool__
+black.is_class->black.__bool__
+black.is_flow_control->black.__bool__
+black.split_line->black.is_def
+black.split_line->black.__str__
+black.split_line->black.is_comment
+black.split_line->black.split_wrapper
+black.split_line->black.right_hand_split
+black.split_line->black.split_line
+black.split_line->black.contains_standalone_comments
+black.__str__->blib2to3.pytree.__unicode__
+black.__str__->blib2to3.pytree.prefix
+black.__str__->black.__bool__
+blib2to3.pytree.__unicode__->blib2to3.pytree.prefix
+black.normalize_string_quotes->black.sub_twice
+black.normalize_string_quotes->re.compile
+black.sub_twice->re._subx
+black.is_import->black.is_import
+black.is_import->black.__bool__
+black.is_yield->black.__bool__
+black.preceding_leaf->blib2to3.pytree.leaves
+black.preceding_leaf->blib2to3.pytree.prev_sibling
+blib2to3.pytree.leaves->blib2to3.pytree.leaves
+black.right_hand_split->black.ensure_visible
+black.right_hand_split->black.normalize_prefix
+black.right_hand_split->black.comments_after
+black.right_hand_split->black.__bool__
+black.right_hand_split->black.append
+black.right_hand_split->.__init__
+black.right_hand_split->black.bracket_split_succeeded_or_raise
+black.bracket_split_succeeded_or_raise->black.__str__
+black.bracket_split_succeeded_or_raise->black.__bool__
+black.split_wrapper->black.standalone_comment_split
+black.split_wrapper->black.normalize_prefix
+black.split_wrapper->black.delimiter_split
+black.delimiter_split->black.append_to_line
+black.delimiter_split->blib2to3.pytree.__new__
+black.delimiter_split->black.max_delimiter_priority
+black.delimiter_split->black.comments_after
+black.delimiter_split->black.__bool__
+black.delimiter_split->black.append
+black.delimiter_split->.__init__
+black.delimiter_split->blib2to3.pytree.__init__
+black.delimiter_split->typing.inner
+black.delimiter_split->black.is_vararg
+black.max_delimiter_priority->black.<genexpr>
+black.standalone_comment_split->black.contains_standalone_comments
+black.maybe_remove_trailing_comma->black.remove_trailing_comma
+black.append_to_line->black.append_safe
+black.append_safe->black.append
+black.append_safe->black.is_comment
+black.visit_stmt->black.visit
+black.visit_stmt->black.line
+black.visit_stmt->black.normalize_invisible_parens
+black.visit_INDENT->black.visit_default
+black.visit_INDENT->black.line
+black.visit_DEDENT->black.line
+black.visit_async_stmt->black.visit
+black.visit_async_stmt->black.line
+black.normalize_invisible_parens->blib2to3.pytree.__init__
+black.normalize_invisible_parens->black.is_empty_tuple
+black.normalize_invisible_parens->blib2to3.pytree.__new__
+black.normalize_invisible_parens->black.is_one_tuple
+black.normalize_invisible_parens->black.max_delimiter_priority_in_atom
+black.normalize_invisible_parens->blib2to3.pytree.insert_child
+black.normalize_invisible_parens->blib2to3.pytree.remove
+blib2to3.pytree.remove->blib2to3.pytree.changed
+blib2to3.pytree.insert_child->blib2to3.pytree.changed
+black.max_delimiter_priority_in_atom->black.max_delimiter_priority
+black.max_delimiter_priority_in_atom->black.mark
+black.max_delimiter_priority_in_atom->.__init__
+black.max_delimiter_priority_in_atom->blib2to3.pytree.leaves
+black.visit_ENDMARKER->black.visit_default
+black.visit_ENDMARKER->black.line
+black.append_comment->black.any_open_brackets
+black.diff->difflib.unified_diff
+black.diff->black.<listcomp>
+
+# Coverage
+
+Name                  Stmts   Miss  Cover   Missing
+---------------------------------------------------
+black.py               1339    469    65%   87-88, 91, 95-96, 175-215, 226-251, 270-315, 337-338, 341-342, 348, 353, 365-380, 393, 397, 400-401, 440-441, 448-457, 460, 466-467, 504-521, 529-530, 744, 747, 782-783, 824-825, 859, 863, 884-885, 892-894, 907, 917-919, 953-963, 970-976, 980, 984, 988, 1012, 1031, 1042, 1046, 1050, 1062, 1095, 1109, 1122, 1135-1144, 1216-1218, 1226-1244, 1248, 1257-1271, 1338, 1364, 1381-1394, 1398-1401, 1428, 1435, 1438-1443, 1446-1450, 1459, 1479, 1487, 1490, 1496-1505, 1524-1525, 1528, 1573, 1589, 1641, 1644-1649, 1664, 1669, 1701, 1714, 1736-1768, 1824-1826, 1851-1855, 1885-1886, 1905-1909, 1915, 1945-1965, 2010, 2013-2014, 2023, 2031-2037, 2043-2044, 2049, 2053, 2112, 2147, 2161, 2166, 2171, 2205, 2212-2214, 2229-2237, 2251-2263, 2267-2268, 2281-2287, 2294-2316, 2322-2374, 2384-2390, 2408, 2425-2427, 2432-2449, 2470-2479, 2484-2485, 2496-2503, 2508-2515, 2519
+tests/__init__.py         0      0   100%
+tests/test_black.py     495    376    24%   29, 35, 56-62, 67-77, 84-100, 104-109, 113-118, 121-135, 138-152, 156-161, 165-169, 173-177, 180-191, 209-215, 219-223, 227-231, 235-239, 243-247, 251-255, 259-263, 267-271, 275-279, 283-287, 291-295, 299-303, 307-311, 314-392, 399-414, 417-434, 441-457, 460-463, 467-483, 486-496, 499-507, 511-529, 532-538, 541-544, 547-548, 551-557, 560-573, 576-579, 583-596, 599-601, 604-619, 623
+---------------------------------------------------
+TOTAL                  1834    845    54%
+

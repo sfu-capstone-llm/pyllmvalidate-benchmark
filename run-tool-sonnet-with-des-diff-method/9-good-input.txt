@@ -1,0 +1,265 @@
+
+# Description
+
+# PR - Fix print() function on Python 2
+
+Fixes #752
+
+# Issue #752 - black inserts unnecessary whitespace around print() with target_version = py27
+
+black is adding whitespace between print and ( with --target-version py27.
+
+Test file:
+
+from __future__ import print_function
+
+print("hello world")
+Result:
+
+$ black t.py --target-version py27 --diff
+--- t.py	2019-03-14 22:09:34.902887 +0000
++++ t.py	2019-03-14 22:10:21.022372 +0000
+@@ -1,4 +1,4 @@
+ from __future__ import print_function
+
+-print("hello world")
++print ("hello world")
+
+reformatted t.py
+All done! ✨ 🍰 ✨
+1 file reformatted.
+Operating system: OS X
+Python version: 3.7.2
+Black version: 19.3b0
+Does also happen on master: yes
+
+# Diff
+
+diff --git a/black.py b/black.py
+index b727666..c44bc9b 100644
+--- a/black.py
++++ b/black.py
+@@ -726,13 +726,13 @@ def get_grammars(target_versions: Set[TargetVersion]) -> List[Grammar]:
+     if not target_versions:
+         return GRAMMARS
+     elif all(not version.is_python2() for version in target_versions):
+-        # Python 2-compatible code, so don't try Python 3 grammar.
++        # Python 3-compatible code, so don't try Python 2 grammar
+         return [
+             pygram.python_grammar_no_print_statement_no_exec_statement,
+             pygram.python_grammar_no_print_statement,
+         ]
+     else:
+-        return [pygram.python_grammar]
++        return [pygram.python_grammar_no_print_statement, pygram.python_grammar]
+ 
+ 
+ def lib2to3_parse(src_txt: str, target_versions: Iterable[TargetVersion] = ()) -> Node:
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver.load_grammar->tempfile.__del__
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver._newer->genericpath.getmtime
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.dump->tempfile.__exit__
+blib2to3.pgen2.grammar.dump->tempfile.func_wrapper
+blib2to3.pgen2.grammar.dump->tempfile.NamedTemporaryFile
+blib2to3.pgen2.grammar.dump->posixpath.dirname
+blib2to3.pgen2.grammar.dump->tempfile.__getattr__
+blib2to3.pgen2.grammar.dump->tempfile.__enter__
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->functools.wraps
+black.dont_increase_indentation->typing.inner
+black.dont_increase_indentation->functools.update_wrapper
+black.format_str->black.maybe_empty_lines
+black.format_str->typing.__new__
+black.format_str->black.get_future_imports
+black.format_str->black.normalize_fmt_off
+black.format_str->black.lib2to3_parse
+black.format_str->black.visit
+black.format_str->black.__str__
+black.format_str->black.split_line
+black.format_str->black.supports_feature
+black.format_str->.__init__
+black.lib2to3_parse->blib2to3.pgen2.driver.parse_string
+black.lib2to3_parse->blib2to3.pgen2.tokenize.generate_tokens
+black.lib2to3_parse->blib2to3.pgen2.driver.__init__
+black.lib2to3_parse->black.get_grammars
+black.get_grammars->black.<genexpr>
+blib2to3.pgen2.driver.__init__->logging.getLogger
+blib2to3.pgen2.driver.parse_string->blib2to3.pgen2.driver.parse_tokens
+blib2to3.pgen2.driver.parse_tokens->logging.debug
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.__init__
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.setup
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.addtoken
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.shift
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.pop
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.push
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.classify
+blib2to3.pgen2.parse.shift->blib2to3.pytree.convert
+blib2to3.pytree.convert->blib2to3.pytree.__new__
+blib2to3.pytree.convert->blib2to3.pytree.__init__
+blib2to3.pgen2.parse.pop->blib2to3.pytree.convert
+blib2to3.pytree.__init__->blib2to3.pytree.invalidate_sibling_maps
+black.get_future_imports->black.get_imports_from_children
+black.get_future_imports->typing.inner
+black.normalize_fmt_off->black.convert_one_fmt_off_pair
+black.convert_one_fmt_off_pair->black.list_comments
+black.convert_one_fmt_off_pair->blib2to3.pytree.leaves
+black.convert_one_fmt_off_pair->blib2to3.pytree.prefix
+blib2to3.pytree.leaves->blib2to3.pytree.leaves
+black.list_comments->.__init__
+black.list_comments->black.make_comment
+black.supports_feature->black.<genexpr>
+black.visit->blib2to3.pytree.type_repr
+black.visit->black.visit_simple_stmt
+black.visit->black.visit_default
+black.visit->black.visit_stmt
+black.visit->black.visit_ENDMARKER
+blib2to3.pytree.type_repr->importlib._bootstrap.parent
+black.visit_default->black.append
+black.visit_default->black.visit_default
+black.visit_default->black.normalize_string_quotes
+black.visit_default->black.normalize_string_prefix
+black.visit_default->black.any_open_brackets
+black.visit_default->black.visit
+black.visit_default->black.generate_comments
+black.visit_default->black.normalize_prefix
+black.visit_default->black.line
+black.visit_simple_stmt->black.visit_default
+black.visit_simple_stmt->black.line
+black.line->black.__bool__
+black.line->.__init__
+black.visit_stmt->black.visit
+black.visit_stmt->black.normalize_invisible_parens
+black.normalize_invisible_parens->blib2to3.pytree.__new__
+black.normalize_invisible_parens->blib2to3.pytree.__init__
+black.normalize_invisible_parens->black.is_one_tuple
+black.normalize_invisible_parens->blib2to3.pytree.prefix
+black.normalize_invisible_parens->blib2to3.pytree.append_child
+black.normalize_invisible_parens->blib2to3.pytree.insert_child
+blib2to3.pytree.prefix->blib2to3.pytree.changed
+blib2to3.pytree.prefix->blib2to3.pytree.prefix
+blib2to3.pytree.insert_child->blib2to3.pytree.changed
+blib2to3.pytree.insert_child->blib2to3.pytree.invalidate_sibling_maps
+blib2to3.pytree.changed->blib2to3.pytree.changed
+blib2to3.pytree.append_child->blib2to3.pytree.changed
+blib2to3.pytree.append_child->blib2to3.pytree.invalidate_sibling_maps
+black.generate_comments->black.list_comments
+black.generate_comments->blib2to3.pytree.__new__
+black.generate_comments->blib2to3.pytree.__init__
+black.generate_comments->blib2to3.pytree.prefix
+black.append->black.whitespace
+black.append->black.is_complex_subscript
+black.append->blib2to3.pytree.prefix
+black.append->black.mark
+black.append->black.append_comment
+black.append->black.maybe_remove_trailing_comma
+black.append_comment->blib2to3.pytree.prefix
+black.maybe_empty_lines->black._maybe_empty_lines
+black._maybe_empty_lines->black.is_def
+black._maybe_empty_lines->black.is_decorator
+black._maybe_empty_lines->black.is_class
+black._maybe_empty_lines->blib2to3.pytree.prefix
+black._maybe_empty_lines->black.__bool__
+black._maybe_empty_lines->black.is_import
+black.is_decorator->black.__bool__
+black.is_class->black.__bool__
+black.split_line->black.__str__
+black.split_line->black.is_comment
+black.split_line->black.is_line_short_enough
+black.split_line->black.contains_inner_type_comments
+black.__str__->black.__bool__
+black.__str__->blib2to3.pytree.__unicode__
+black.__str__->blib2to3.pytree.prefix
+black.normalize_prefix->blib2to3.pytree.prefix
+black.mark->black.maybe_decrement_after_lambda_arguments
+black.mark->black.maybe_increment_lambda_arguments
+black.mark->black.maybe_increment_for_loop_variable
+black.mark->black.is_split_after_delimiter
+black.mark->black.maybe_decrement_after_for_loop_variable
+black.mark->black.is_split_before_delimiter
+black.is_split_before_delimiter->black.is_vararg
+black.is_complex_subscript->black.get_open_lsqb
+black.whitespace->black.preceding_leaf
+black.whitespace->blib2to3.pytree.prev_sibling
+blib2to3.pytree.prev_sibling->blib2to3.pytree.update_sibling_maps
+black.is_import->black.__bool__
+black.is_import->black.is_import
+blib2to3.pytree.__unicode__->blib2to3.pytree.prefix
+black.is_line_short_enough->black.contains_standalone_comments
+black.preceding_leaf->blib2to3.pytree.prev_sibling
+black.normalize_string_prefix->re.match
+black.normalize_string_quotes->re.compile
+black.normalize_string_quotes->black.sub_twice
+black.sub_twice->re._subx
+black.visit_ENDMARKER->black.visit_default
+black.visit_ENDMARKER->black.line
+black.assert_stable->black.format_str

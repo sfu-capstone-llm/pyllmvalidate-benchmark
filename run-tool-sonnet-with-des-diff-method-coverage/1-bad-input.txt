@@ -1,0 +1,253 @@
+
+# Description
+
+# PR - permits black to run in AWS Lambda:
+
+AWS Lambda and some other virtualized environment may not permit access
+to /dev/shm on Linux and as such, trying to use ProcessPoolExecutor will
+fail.
+
+As using parallelism is only a 'nice to have' feature of black, if it fails
+we gracefully fallback to a monoprocess implementation, which permits black
+to finish normally.
+
+should fix #1138 and #776
+
+# Issue #1138 - Feature request: permits to disable parallel run for system without support for it
+
+On some virtualized environment you don't have access to /dev/shm which prevent the use of multi-processing. The most notable use case being AWS Lambda, where /dev/shm is simply not present.
+
+A quick and dirty patch show that simply replacing https://github.com/psf/black/blob/master/black.py#L544 by None
+and removing this line https://github.com/psf/black/blob/master/black.py#L559
+permits black to run in AWS Lambda, which is a huge win in term of CI (as black fits perfectly the use for serverless, i.e short runtime, low memory consumption, triggered on specific event)
+
+so it could be implemented either (or both) by providing a --no-parallel or by detecting that /dev/shm is not possible (I need to dig on how to do that) and in these case to not use the ProcessPoolExecutor
+
+I can provide the pull request if it seems acceptable to you
+
+# Issue #776 - Concurrency crash
+
+Operating system: Ubuntu Xenial (on Travis)
+Python version: 3.6.8
+Black version: 19.3b0
+Does also happen on master: Haven't tested but when through the commits since the release. No commits seem to touch the codepath we're seeing here.
+
+black crashes on certain system configurations due to multiprocessing. Here is the traceback we're seeing.
+
+|Traceback (most recent call last):
+|  File "/usr/local/lib/XXX/virtualenv/bin/black", line 11, in <module>
+|    sys.exit(patched_main())
+|  File "/usr/local/lib/XXX/virtualenv/lib/python3.6/site-packages/black.py", line 3754, in patched_main
+|    main()
+|  File "/usr/local/lib/XXX/virtualenv/lib/python3.6/site-packages/click/core.py", line 764, in __call__
+|    return self.main(*args, **kwargs)
+|  File "/usr/local/lib/XXX/virtualenv/lib/python3.6/site-packages/click/core.py", line 717, in main
+|    rv = self.invoke(ctx)
+|  File "/usr/local/lib/XXX/virtualenv/lib/python3.6/site-packages/click/core.py", line 956, in invoke
+|    return ctx.invoke(self.callback, **ctx.params)
+|  File "/usr/local/lib/XXX/virtualenv/lib/python3.6/site-packages/click/core.py", line 555, in invoke
+|    return callback(*args, **kwargs)
+|  File "/usr/local/lib/XXX/virtualenv/lib/python3.6/site-packages/click/decorators.py", line 17, in new_func
+|    return f(get_current_context(), *args, **kwargs)
+|  File "/usr/local/lib/XXX/virtualenv/lib/python3.6/site-packages/black.py", line 435, in main
+|    executor = ProcessPoolExecutor(max_workers=os.cpu_count())
+|  File "/usr/lib/python3.6/concurrent/futures/process.py", line 402, in __init__
+|    EXTRA_QUEUED_CALLS)
+|  File "/usr/lib/python3.6/multiprocessing/context.py", line 102, in Queue
+|    return Queue(maxsize, ctx=self.get_context())
+|  File "/usr/lib/python3.6/multiprocessing/queues.py", line 42, in __init__
+|    self._rlock = ctx.Lock()
+|  File "/usr/lib/python3.6/multiprocessing/context.py", line 67, in Lock
+|    return Lock(ctx=self.get_context())
+|  File "/usr/lib/python3.6/multiprocessing/synchronize.py", line 162, in __init__
+|    SemLock.__init__(self, SEMAPHORE, 1, 1, ctx=ctx)
+|  File "/usr/lib/python3.6/multiprocessing/synchronize.py", line 59, in __init__
+|    unlink_now)
+|OSError: [Errno 30] Read-only file system
+This only happens when running black on more than 1 file at a time. There should probably be an option (or codepath which tries to correct this issue) for serial execution.
+
+# Diff
+
+diff --git a/black.py b/black.py
+index 2a913fc..fc1597a 100644
+--- a/black.py
++++ b/black.py
+@@ -618,7 +618,14 @@ def reformat_many(
+     if sys.platform == "win32":
+         # Work around https://bugs.python.org/issue26903
+         worker_count = min(worker_count, 61)
+-    executor = ProcessPoolExecutor(max_workers=worker_count)
++    try:
++        executor = ProcessPoolExecutor(max_workers=worker_count)
++    except OSError:
++        # we arrive here if the underlying system does not support multi-processing
++        # like in AWS Lambda, in which case we gracefully fallback to the default
++        # mono-process Executor by using None
++        executor = ProcessPoolExecutor()
++
+     try:
+         loop.run_until_complete(
+             schedule_formatting(
+@@ -633,7 +640,8 @@ def reformat_many(
+         )
+     finally:
+         shutdown(loop)
+-        executor.shutdown()
++        if executor is not None:
++            pass
+ 
+ 
+ async def schedule_formatting(
+@@ -643,7 +651,7 @@ async def schedule_formatting(
+     mode: Mode,
+     report: "Report",
+     loop: asyncio.AbstractEventLoop,
+-    executor: Executor,
++    executor: Optional[Executor],
+ ) -> None:
+     """Run formatting of `sources` in parallel using the provided `executor`.
+ 
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize._combinations->blib2to3.pgen2.tokenize.<genexpr>
+blib2to3.pygram.initialize->blib2to3.pgen2.grammar.copy
+blib2to3.pygram.initialize->blib2to3.pygram.__init__
+blib2to3.pygram.initialize->blib2to3.pgen2.driver.load_packaged_grammar
+blib2to3.pygram.initialize->posixpath.dirname
+blib2to3.pygram.initialize->posixpath.join
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.basename
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.join
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->typing.inner
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.dump->posixpath.dirname
+blib2to3.pgen2.grammar.dump->tempfile.NamedTemporaryFile
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.dont_increase_indentation->typing.inner
+black.dont_increase_indentation->functools.update_wrapper
+black.dont_increase_indentation->functools.wraps
+black.write_cache->pathlib.__reduce__
+black.write_cache->tempfile.__getattr__
+black.write_cache->tempfile.__enter__
+black.write_cache->black.<dictcomp>
+black.write_cache->tempfile.__exit__
+black.write_cache->pathlib.__fspath__
+black.write_cache->black.get_cache_file
+black.write_cache->tempfile.func_wrapper
+black.write_cache->pathlib.__str__
+black.write_cache->pathlib.parent
+black.write_cache->tempfile.NamedTemporaryFile
+black.write_cache->pathlib.mkdir
+black.get_cache_file->black.get_cache_key
+black.get_cache_file->pathlib.__truediv__
+black.get_cache_info->pathlib.stat
+black.read_pyproject_toml->black.parse_pyproject_toml
+black.parse_pyproject_toml->black.<dictcomp>
+black.parse_pyproject_toml->toml.decoder.load
+black.target_version_option_callback->black.<listcomp>
+black.main->pathlib.__new__
+black.main->black.gen_python_files_in_dir
+black.main->pathlib.__hash__
+black.main->black.from_configuration
+black.main->black.__init__
+black.main->black.re_compile_maybe_verbose
+black.main->pathlib.is_dir
+black.main->black.get_gitignore
+black.main->black.path_empty
+black.main->black.find_project_root
+black.main->black.reformat_many
+black.re_compile_maybe_verbose->regex.regex.compile
+black.find_project_root->pathlib.exists
+black.find_project_root->pathlib.is_file
+black.find_project_root->black.<genexpr>
+black.find_project_root->collections.abc.__iter__
+black.find_project_root->pathlib.is_dir
+black.find_project_root->pathlib.__truediv__
+black.find_project_root->pathlib.parents
+black.get_gitignore->pathlib.is_file
+black.get_gitignore->pathlib.__truediv__
+black.get_gitignore->pathspec.pathspec.from_lines
+black.gen_python_files_in_dir->pathlib.relative_to
+black.gen_python_files_in_dir->pathlib.iterdir
+black.gen_python_files_in_dir->pathlib.resolve
+black.gen_python_files_in_dir->pathlib.is_file
+black.gen_python_files_in_dir->pathlib.is_dir
+black.gen_python_files_in_dir->pathlib.is_absolute
+black.gen_python_files_in_dir->pathspec.pathspec.match_file
+black.gen_python_files_in_dir->pathlib.as_posix
+black.reformat_many->unittest.mock.__call__
+black.reformat_many->asyncio.events.get_event_loop_policy
+black.reformat_many->asyncio.events.get_event_loop
+
+# Coverage
+
+Name                              Stmts   Miss  Cover   Missing
+---------------------------------------------------------------
+black.py                           2842   2276    20%   64, 120, 123, 128, 131, 154, 157, 178, 246, 266, 271-273, 295-297, 301-302, 309-321, 491-495, 497-501, 512, 514-515, 518-520, 523-525, 538-542, 544-546, 549, 561-564, 574-576, 587-609, 620, 629-644, 663-715, 731-765, 770-781, 794-809, 821-846, 856-866, 898-931, 940-948, 952-987, 992-1014, 1019-1020, 1036-1048, 1052-1054, 1062-1079, 1087-1090, 1231-1254, 1258, 1266, 1273-1277, 1285-1290, 1294-1304, 1312-1317, 1321-1330, 1334, 1359-1375, 1383-1392, 1397, 1402, 1407, 1412, 1421, 1431-1486, 1491-1500, 1513, 1526, 1534-1538, 1541-1574, 1577-1605, 1608, 1612-1645, 1649-1682, 1686, 1690-1692, 1698-1710, 1715, 1723-1735, 1739, 1763-1773, 1776-1812, 1817-1856, 1880-1886, 1890-1916, 1921-1922, 1929-1936, 1952-1957, 1961-1964, 1968-1980, 1984-1995, 1999-2001, 2005, 2009-2010, 2013-2015, 2022-2032, 2036-2044, 2048-2068, 2085-2306, 2311-2324, 2332-2340, 2345-2348, 2356-2373, 2384-2387, 2398-2483, 2509-2510, 2534-2565, 2576-2584, 2599-2691, 2765-2786, 2832, 2842-2843, 2858-2863, 2870-2871, 2898-2913, 2916-2940, 2956-2976, 2989-3119, 3139-3179, 3200-3243, 3246-3273, 3310-3319, 3332-3362, 3379-3468, 3521-3557, 3560-3758, 3784-3855, 3858-3859, 3874-3886, 3939-3965, 3980-3990, 4005-4017, 4032-4052, 4067-4099, 4113-4137, 4140-4232, 4304-4305, 4318-4323, 4339-4374, 4382-4383, 4393-4397, 4446-4458, 4466-4467, 4477-4480, 4484, 4488, 4492, 4511-4519, 4527, 4543-4551, 4562-4568, 4579-4587, 4606-4620, 4632-4658, 4675-4747, 4764-4770, 4784-4815, 4826-4828, 4840-4900, 4908-4931, 4936-4939, 4951-4953, 4962-4971, 4981-4987, 4998-5063, 5072-5099, 5104-5108, 5120-5164, 5169-5171, 5179-5225, 5233-5246, 5250-5256, 5260-5270, 5274-5277, 5288-5313, 5320-5324, 5336, 5348-5355, 5366-5373, 5378-5385, 5394-5395, 5400-5416, 5427-5439, 5444, 5449-5457, 5462-5469, 5482-5501, 5510-5513, 5519-5533, 5545-5582, 5587-5588, 5603-5640, 5645-5690, 5699-5700, 5723-5724, 5729-5740, 5743, 5747-5748, 5751, 5772, 5780, 5783, 5786, 5805-5817, 5821-5822, 5825-5826, 5839-5845, 5852-5874, 5878-5893, 5900-5909, 5917-5967, 5972-5994, 6003-6009, 6019-6026, 6035, 6040-6044, 6051-6053, 6058-6079, 6088, 6097, 6104-6107, 6117-6129, 6137-6139, 6153-6179, 6189-6268, 6280-6290, 6305-6312, 6324-6325, 6339-6347, 6351-6353, 6358-6380, 6384
+blackd.py                           116     83    28%   51-55, 59-73, 77-149, 153-184, 188-190, 194
+env/src/black/_black_version.py       1      0   100%
+tests/__init__.py                     0      0   100%
+tests/test_black.py                1428   1121    21%   27-28, 48, 53-71, 79, 86-94, 99-105, 137-153, 166-172, 176-180, 183-191, 194, 197, 200, 203, 206, 209, 212, 215, 218, 221, 224, 227, 230, 233-242, 245-265, 268-287, 291-295, 299-303, 307-311, 315-319, 323-328, 331-336, 339-350, 353-375, 378-394, 398-402, 406-411, 414-419, 423-432, 436-440, 444-448, 453-457, 462-466, 470-474, 478-482, 486-490, 494-498, 502-506, 510-514, 518-522, 526-530, 534-538, 542-546, 550-554, 558-562, 566-570, 574-578, 582-586, 590-595, 599-604, 608-611, 615-619, 623-628, 632-636, 640-644, 648-659, 663-674, 678-684, 688-692, 696-700, 704-708, 712-716, 720-724, 728-732, 736-740, 744-748, 752-756, 759-778, 781-876, 883-970, 977-1067, 1074-1096, 1099-1127, 1130-1157, 1160-1177, 1184-1201, 1204-1207, 1211-1227, 1230-1241, 1244-1252, 1256-1274, 1289-1295, 1298-1305, 1308-1315, 1318-1320, 1323-1330, 1333-1346, 1349-1353, 1357-1370, 1373-1376, 1380-1388, 1391-1393, 1396-1402, 1405-1414, 1417-1421, 1424-1439, 1443-1464, 1467-1473, 1476-1491, 1495-1516, 1519-1523, 1526-1534, 1537-1553, 1556-1574, 1577-1604, 1607-1631, 1634-1635, 1638-1647, 1650-1660, 1663-1664, 1667-1705, 1708-1727, 1730-1742, 1746-1750, 1753-1760, 1765, 1773-1776, 1782-1784, 1790-1793, 1802-1805, 1811-1814, 1820-1834, 1840-1845, 1851-1865, 1871-1903, 1909-1912, 1918-1921, 1927-1928, 1932
+---------------------------------------------------------------
+TOTAL                              4387   3480    21%
+

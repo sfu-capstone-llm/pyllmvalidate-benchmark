@@ -1,0 +1,364 @@
+
+# Description
+
+# PR
+
+Remove standalone comment hacks
+Now Black properly splits standalone comments within bracketed expressions.
+They are treated as another type of split instead of being bolted on with
+whitespace prefixes.
+
+A related fix: now multiple comments might appear after a given leaf.
+
+Fixes #22
+
+# Issue #22 - Standalone comments inside nested bracketed expressions block the expression from wrapping
+
+This is... not what I expected black to do :-)
+
+     # Capture each of the exceptions in the MultiError along with each of their causes and contexts
+     if isinstance(exc_value, MultiError):
+         embedded = []
+         for exc in exc_value.exceptions:
+             if exc not in _seen:
+                 embedded.append(
+-                    traceback.TracebackException.from_exception(
+-                        exc,
+-                        limit=limit,
+-                        lookup_lines=lookup_lines,
+-                        capture_locals=capture_locals,
+-                        # copy the set of _seen exceptions so that duplicates
+-                        # shared between sub-exceptions are not omitted
+-                        _seen=set(_seen)
+-                    )
++                    traceback.TracebackException.from_exception(exc, limit=limit, lookup_lines=lookup_lines, capture_locals=capture_locals, _seen=set(_seen))
++                    # copy the set of _seen exceptions so that duplicates
++                    # shared between sub-exceptions are not omitted
+                 )
+
+# Diff
+
+diff --git a/black.py b/black.py
+index dab3f00..6499b22 100644
+--- a/black.py
++++ b/black.py
+@@ -1439,23 +1469,24 @@ def split_line(
+     If `py36` is True, splitting may generate syntax that is only compatible
+     with Python 3.6 and later.
+     """
+-    if isinstance(line, UnformattedLines):
++    if isinstance(line, UnformattedLines):
+         yield line
+         return
+ 
+     line_str = str(line).strip('\n')
+-    if len(line_str) <= line_length and '\n' not in line_str:
++    if len(line_str) <= line_length and '\n' not in line_str:
+         yield line
+         return
+ 
++    split_funcs: List[SplitFunc]
+     if line.is_def:
+         split_funcs = [left_hand_split]
+     elif line.inside_brackets:
+-        split_funcs = [delimiter_split]
+-        if '\n' not in line_str:
+-            # Only attempt RHS if we don't have multiline strings or comments
+-            # on this line.
+-            split_funcs.append(right_hand_split)
++        split_funcs = [delimiter_split, standalone_comment_split, right_hand_split]
+     else:
+         split_funcs = [right_hand_split]
+     for split_func in split_funcs:
+@@ -1464,7 +1495,7 @@ def split_line(
+         # split altogether.
+         result: List[Line] = []
+         try:
+-            for l in split_func(line, py36=py36):
++            for l in split_func(line, py36):
+                 if str(l).strip('\n') == line_str:
+                     raise CannotSplit("Split function returned an unchanged result")
+ 
+@@ -1615,11 +1659,24 @@ def delimiter_split(line: Line, py36: bool = False) -> Iterator[Line]:
+     current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
+     lowest_depth = sys.maxsize
+     trailing_comma_safe = True
++
++    def append_to_line(leaf: Leaf) -> Iterator[Line]:
++        """Append `leaf` to current line or to new line if appending impossible."""
++        nonlocal current_line
++        try:
++            current_line.append_safe(leaf, preformatted=True)
++        except ValueError as ve:
++            yield current_line
++
++            current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
++            current_line.append(leaf)
++
+     for leaf in line.leaves:
+-        current_line.append(leaf, preformatted=True)
+-        comment_after = line.comments.get(id(leaf))
+-        if comment_after:
+-            current_line.append(comment_after, preformatted=True)
++        yield from append_to_line(leaf)
++
++        for comment_after in line.comments_after(leaf):
++            yield from append_to_line(comment_after)
++
+         lowest_depth = min(lowest_depth, leaf.bracket_depth)
+         if (
+             leaf.bracket_depth == lowest_depth
+@@ -1629,7 +1686,6 @@ def delimiter_split(line: Line, py36: bool = False) -> Iterator[Line]:
+             trailing_comma_safe = trailing_comma_safe and py36
+         leaf_priority = delimiters.get(id(leaf))
+         if leaf_priority == delimiter_priority:
+-            normalize_prefix(current_line.leaves[0], inside_brackets=True)
+             yield current_line
+ 
+             current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
+@@ -1640,7 +1696,40 @@ def delimiter_split(line: Line, py36: bool = False) -> Iterator[Line]:
+             and trailing_comma_safe
+         ):
+             current_line.append(Leaf(token.COMMA, ','))
+-        normalize_prefix(current_line.leaves[0], inside_brackets=True)
++        yield current_line
++
++
++@dont_increase_indentation
++def standalone_comment_split(line: Line, py36: bool = False) -> Iterator[Line]:
++    """Split standalone comments from the rest of the line."""
++    for leaf in line.leaves:
++        if leaf.type == STANDALONE_COMMENT:
++            if leaf.bracket_depth == 0:
++                break
++
++    else:
++        raise CannotSplit("Line does not have any standalone comments")
++
++    current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
++
++    def append_to_line(leaf: Leaf) -> Iterator[Line]:
++        """Append `leaf` to current line or to new line if appending impossible."""
++        nonlocal current_line
++        try:
++            current_line.append_safe(leaf, preformatted=True)
++        except ValueError as ve:
++            yield current_line
++
++            current_line = Line(depth=line.depth, inside_brackets=line.inside_brackets)
++            current_line.append(leaf)
++
++    for leaf in line.leaves:
++        yield from append_to_line(leaf)
++
++        for comment_after in line.comments_after(leaf):
++            yield from append_to_line(comment_after)
++
++    if current_line:
+         yield current_line
+ 
+ 
+
+
+# Method Trace
+
+blib2to3.pgen2.tokenize.any->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.tokenize.maybe->blib2to3.pgen2.tokenize.group
+blib2to3.pgen2.driver.load_packaged_grammar->blib2to3.pgen2.driver.load_grammar
+blib2to3.pgen2.driver.load_packaged_grammar->genericpath.isfile
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.pgen.generate_grammar
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._generate_pickle_name
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.grammar.dump
+blib2to3.pgen2.driver.load_grammar->blib2to3.pgen2.driver._newer
+blib2to3.pgen2.driver.load_grammar->logging.info
+blib2to3.pgen2.driver.load_grammar->logging.getLogger
+blib2to3.pgen2.driver._generate_pickle_name->posixpath.splitext
+blib2to3.pgen2.driver._newer->genericpath.exists
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.generate_grammar->blib2to3.pgen2.pgen.make_grammar
+blib2to3.pgen2.pgen.__init__->codecs.__init__
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.addfirstsets
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.__init__->blib2to3.pgen2.pgen.parse
+blib2to3.pgen2.pgen.__init__->_bootlocale.getpreferredencoding
+blib2to3.pgen2.pgen.gettoken->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.tokenize.generate_tokens->codecs.decode
+blib2to3.pgen2.tokenize.generate_tokens->codecs.getstate
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.simplify_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.make_dfa
+blib2to3.pgen2.pgen.parse->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.expect->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.parse_alt
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_rhs->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.parse_item
+blib2to3.pgen2.pgen.parse_alt->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_atom
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_item->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.expect
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.gettoken
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.parse_rhs
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.parse_atom->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.__init__
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.closure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.make_dfa->blib2to3.pgen2.pgen.addarc
+blib2to3.pgen2.pgen.closure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.addclosure->blib2to3.pgen2.pgen.addclosure
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.unifystate
+blib2to3.pgen2.pgen.simplify_dfa->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.addfirstsets->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.calcfirst->blib2to3.pgen2.pgen.calcfirst
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.grammar.__init__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_first
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.__eq__
+blib2to3.pgen2.pgen.make_grammar->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_first->blib2to3.pgen2.pgen.make_label
+blib2to3.pgen2.pgen.make_label->blib2to3.pgen2.pgen.<module>
+blib2to3.pgen2.grammar.dump->blib2to3.pgen2.grammar._make_deterministic
+blib2to3.pgen2.grammar._make_deterministic->blib2to3.pgen2.grammar.<genexpr>
+blib2to3.pgen2.grammar._make_deterministic->blib2to3.pgen2.grammar.<listcomp>
+blib2to3.pgen2.grammar.copy->blib2to3.pgen2.grammar.__init__
+black.format_str->black.__str__
+black.format_str->black.lib2to3_parse
+black.format_str->black.split_line
+black.format_str->black.is_python36
+black.format_str->typing.__new__
+black.format_str->black.maybe_empty_lines
+black.format_str->.__init__
+black.format_str->black.visit
+black.lib2to3_parse->blib2to3.pgen2.driver.parse_string
+black.lib2to3_parse->blib2to3.pgen2.tokenize.generate_tokens
+black.lib2to3_parse->blib2to3.pgen2.driver.__init__
+blib2to3.pgen2.driver.__init__->logging.getLogger
+blib2to3.pgen2.driver.parse_string->blib2to3.pgen2.driver.parse_tokens
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.setup
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.__init__
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.tokenize.generate_tokens
+blib2to3.pgen2.driver.parse_tokens->logging.debug
+blib2to3.pgen2.driver.parse_tokens->blib2to3.pgen2.parse.addtoken
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.pop
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.classify
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.shift
+blib2to3.pgen2.parse.addtoken->blib2to3.pgen2.parse.push
+blib2to3.pgen2.parse.shift->blib2to3.pytree.convert
+blib2to3.pytree.convert->blib2to3.pytree.__init__
+blib2to3.pytree.convert->blib2to3.pytree.__new__
+blib2to3.pgen2.parse.pop->blib2to3.pytree.convert
+black.is_python36->blib2to3.pytree.pre_order
+blib2to3.pytree.pre_order->blib2to3.pytree.pre_order
+black.visit->black.visit_DEDENT
+black.visit->black.visit_stmt
+black.visit->black.visit_ENDMARKER
+black.visit->blib2to3.pytree.type_repr
+black.visit->black.visit_default
+black.visit->black.visit_INDENT
+black.visit->black.visit_simple_stmt
+black.visit->black.visit
+blib2to3.pytree.type_repr->importlib._bootstrap.parent
+black.visit_default->black.append
+black.visit_default->click.termui.secho
+black.visit_default->blib2to3.pytree.type_repr
+black.visit_default->black.visit_default
+black.visit_default->black.any_open_brackets
+black.visit_default->black.generate_comments
+black.visit_default->black.normalize_prefix
+black.visit_default->black.line
+black.visit_default->blib2to3.pytree.prefix
+black.visit_default->black.visit
+black.visit_stmt->black.line
+black.visit_stmt->black.visit
+black.line->.__init__
+black.line->black.__bool__
+black.generate_comments->blib2to3.pytree.__init__
+black.generate_comments->blib2to3.pytree.prefix
+black.generate_comments->black.make_comment
+black.generate_comments->blib2to3.pytree.__new__
+black.normalize_prefix->blib2to3.pytree.prefix
+blib2to3.pytree.prefix->blib2to3.pytree.changed
+blib2to3.pytree.changed->blib2to3.pytree.changed
+black.append->black.append_comment
+black.append->black.maybe_remove_trailing_comma
+black.append->black.maybe_decrement_after_for_loop_variable
+black.append->black.maybe_adapt_standalone_comment
+black.append->black.maybe_increment_for_loop_variable
+black.append->black.whitespace
+black.append->blib2to3.pytree.prefix
+black.append->black.mark
+black.mark->black.is_delimiter
+black.whitespace->black.preceding_leaf
+black.whitespace->blib2to3.pytree.prev_sibling
+black.preceding_leaf->blib2to3.pytree.leaves
+black.preceding_leaf->blib2to3.pytree.prev_sibling
+black.visit_INDENT->black.line
+black.visit_INDENT->black.visit_default
+black.maybe_empty_lines->black._maybe_empty_lines
+black._maybe_empty_lines->black.__bool__
+black._maybe_empty_lines->black.is_def
+black._maybe_empty_lines->black.is_yield
+black._maybe_empty_lines->black.is_decorator
+black._maybe_empty_lines->black.is_class
+black._maybe_empty_lines->black.is_import
+black._maybe_empty_lines->black.is_flow_control
+black._maybe_empty_lines->blib2to3.pytree.prefix
+black.is_decorator->black.__bool__
+black.split_line->black.__str__
+black.split_line->black.is_def
+black.split_line->black.delimiter_split
+black.split_line->black.right_hand_split
+black.split_line->black.split_line
+black.__str__->blib2to3.pytree.prefix
+black.__str__->black.__bool__
+black.__str__->blib2to3.pytree.__unicode__
+blib2to3.pytree.__unicode__->blib2to3.pytree.prefix
+black.visit_simple_stmt->black.line
+black.visit_simple_stmt->black.visit_default
+black.maybe_adapt_standalone_comment->black.any_open_brackets
+black.maybe_adapt_standalone_comment->blib2to3.pytree.prefix
+black.maybe_adapt_standalone_comment->black.append_comment
+black.append_comment->blib2to3.pytree.prefix
+black.append_comment->black.last_non_delimiter
+black.append_comment->blib2to3.pytree.__unicode__
+black.last_non_delimiter->black.is_delimiter
+blib2to3.pytree.leaves->blib2to3.pytree.leaves
+black.is_class->black.__bool__
+black.is_flow_control->black.__bool__
+black.is_import->black.is_import
+black.is_import->black.__bool__
+black.is_yield->black.__bool__
+black.right_hand_split->black.append
+black.right_hand_split->black.__bool__
+black.right_hand_split->black.bracket_split_succeeded_or_raise
+black.right_hand_split->black.normalize_prefix
+black.right_hand_split->.__init__
+black.bracket_split_succeeded_or_raise->black.__str__
+black.bracket_split_succeeded_or_raise->black.__bool__
+black.delimiter_split->black.append
+black.delimiter_split->black.max_delimiter_priority
+black.delimiter_split->black.__bool__
+black.delimiter_split->black.normalize_prefix
+black.delimiter_split->blib2to3.pytree.__init__
+black.delimiter_split->blib2to3.pytree.__new__
+black.delimiter_split->.__init__
+black.max_delimiter_priority->black.<genexpr>
+black.visit_DEDENT->black.line
+black.visit_ENDMARKER->black.line
+black.visit_ENDMARKER->black.visit_default
+
+# Coverage
+
+Name                  Stmts   Miss  Cover   Missing
+---------------------------------------------------
+black.py               1018    385    62%   60-61, 64, 68-69, 116-158, 176-198, 209-221, 232-242, 254-264, 281, 302-303, 310-319, 322, 328-329, 391-392, 479, 499, 561, 587-588, 635-636, 639-642, 655, 659, 672, 775-785, 792-798, 802, 806, 810, 814, 838, 857, 860-861, 870-877, 880, 888, 895, 921, 935, 961-970, 1008-1010, 1018-1029, 1033-1035, 1039, 1048-1058, 1094, 1107, 1120, 1123-1131, 1134-1135, 1142, 1153, 1161, 1168-1172, 1176-1189, 1193-1196, 1223, 1230, 1233-1238, 1241-1245, 1249-1257, 1262, 1270-1271, 1275-1279, 1283-1299, 1302-1311, 1314, 1330-1331, 1334, 1346, 1353, 1402, 1405, 1420, 1425, 1443-1444, 1452, 1458, 1491-1526, 1586, 1589, 1604-1605, 1629, 1690, 1697-1699, 1714-1722, 1735-1741, 1745-1746, 1759-1765, 1772-1794, 1800-1852, 1862-1868, 1878-1886, 1891-1895, 1901
+tests/__init__.py         0      0   100%
+tests/test_black.py     259    174    33%   24, 39-40, 60-61, 67-68, 73-78, 82-87, 90-102, 106-111, 115-119, 123-127, 131-135, 139-143, 147-151, 158-159, 163-167, 171-175, 179-183, 187-191, 195-199, 203-207, 210-279, 286-301, 304-321, 329
+---------------------------------------------------
+TOTAL                  1277    559    56%
+
