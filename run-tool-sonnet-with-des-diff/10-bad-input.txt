@@ -1,0 +1,47 @@
+
+# Description
+
+# PR - Fix indent calculation with tabs when computing prefixes
+
+Closes #262, bug seems to have been introduced in 54d707e. Indent widths in lib2to3 for tabs are actually counted as 1, not 4, so consuming the prefix needs to match that.
+
+# Issue #262 - Indentation is incorrectly changed for tabulated comments after a dedent
+
+Operating system: Ubuntu 18.04
+Python version: 3.6.3
+Black version: master
+
+Thank you @ambv for this library. When trying to run this on a codebase that uses tabs, indentation for comments past depth 0 is changed incorrectly after a dedent. Sample input (NB tabs):
+
+if 1:
+	if 2:
+		pass
+	# This comment should be indented the same as the next line
+	pass
+Black reformats this to:
+
+if 1:
+    if 2:
+        pass
+        # This comment should be indented the same as the next line
+    pass
+Note that this only happens when the input file uses tabs.
+
+# Diff
+
+diff --git a/blib2to3/pgen2/driver.py b/blib2to3/pgen2/driver.py
+index 72d9f47..6626c05 100644
+--- a/blib2to3/pgen2/driver.py
++++ b/blib2to3/pgen2/driver.py
+@@ -131,10 +131,8 @@ class Driver(object):
+                     current_line = ""
+                     current_column = 0
+                     wait_for_nl = False
+-            elif char == ' ':
++            elif char == ' ':
+                 current_column += 1
+-            elif char == '\t':
+-                current_column += 4
+             elif char == '\n':
+                 # unexpected empty line
+                 current_column = 0

@@ -1,0 +1,54 @@
+
+# Description
+
+# PR - [#154] Handle comments between decorators properly
+
+# Issue #154 - Adds blank lines after comment between decorators
+
+Given t.py:
+
+@property
+# TODO: X
+@property
+def foo():
+    pass
+Running black --diff t.py gives:
+
+--- t-black.py  (original)
++++ t-black.py  (formatted)
+@@ -1,6 +1,8 @@
+ @property
+ # TODO: X
++
++
+ @property
+ def foo():
+     pass
+Where flake8 then complains:
+
+stdin:5:1: E304 blank lines found after function decorator
+
+Operating system: Arch Linux
+Python version: 3.6.5
+Black version: 18.4a2
+Does also happen on master: Haven't checked.
+
+
+
+# Diff
+
+diff --git a/black.py b/black.py
+index 15a7547..a03b9aa 100644
+--- a/black.py
++++ b/black.py
+@@ -1044,6 +1044,10 @@ class EmptyLineTracker:
+                 # Don't insert empty lines between decorators.
+                 return 0, 0
+ 
++            if is_decorator and self.previous_line and self.previous_line.is_comment:
++                # Always insert an empty line after decorator comments.
++                return 1, 0
++
+             newlines = 2
+             if current_line.depth:
+                 newlines -= 1

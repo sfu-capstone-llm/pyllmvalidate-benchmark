@@ -1,0 +1,117 @@
+
+# Description
+
+# PR - Fix for "# fmt: on" with decorators
+
+Re-submitting #1324 using correct email.
+
+This is quick and likely dirty fix for #560. It is based on assumption that indentation has semantic meaning in Python so in case if # fmt: on exists in node children at the same column as opening # fmt: off we should process each child separately excluding only those before # fmt: on.
+
+This seems to work for my use case which is blocking black adoption in my team and doesn't break any tests but it would be great if someone with more experience in codebase could help to polish it because I dived into black source code only two hours ago.
+
+Thanks!
+
+# Issue #560 - "fmt: on" does not work when crossing block boundaries and decorators
+
+Operating system: Linux Mint 19.0
+Python version: 3.6.6
+Black version: 18.9b0
+Does also happen on master: yes
+
+Simplest reproducer: the following is left unchanged. In fact, it behaves as if # fmt: off is true until end of file.
+
+# fmt: off
+if (x and y):
+# fmt: on
+    pass
+
+if (x and y):
+    pass
+The soonest # fmt: on takes effect is at end of the indented if block.
+
+Ran into this with a series of decorators:
+
+# fmt: off
+@click.command()
+@click.option("-a", "--align",      help="aligned help texts")
+@click.option("-b", "--big-option", help="should stay aligned")
+# fmt: on
+def foo(align,    big_option):
+    pass
+Simple workaround for me is keep the formatter commands within a "block" - the following works perfectly fine:
+
+@click.command()
+# fmt: off
+@click.option("-a", "--align",      help="aligned help texts")
+@click.option("-b", "--big-option", help="should stay aligned")
+# fmt: on
+def foo(align, big_option):
+    pass
+
+
+# Diff
+
+diff --git a/black.py b/black.py
+index 2df03f7..e55e4fe 100644
+--- a/black.py
++++ b/black.py
+@@ -3116,18 +3116,49 @@ def generate_ignored_nodes(leaf: Leaf) -> Iterator[LN]:
+     """
+     container: Optional[LN] = container_of(leaf)
+     while container is not None and container.type != token.ENDMARKER:
+-        is_fmt_on = False
+-        for comment in list_comments(container.prefix, is_endmarker=False):
+-            if comment.value in FMT_ON:
+-                is_fmt_on = True
+-            elif comment.value in FMT_OFF:
+-                is_fmt_on = False
+-        if is_fmt_on:
++        if fmt_on(container):
+             return
+ 
+-        yield container
++        # fix for fmt: on in children
++        if contains_fmt_on_at_column(container, leaf.column):
++            for child in container.children:
++                if contains_fmt_on_at_column(child, leaf.column):
++                    return
++                yield child
++        else:
++            yield container
++            container = container.next_sibling
++
+ 
+-        container = container.next_sibling
++def fmt_on(container: LN) -> bool:
++    is_fmt_on = False
++    for comment in list_comments(container.prefix, is_endmarker=False):
++        if comment.value in FMT_ON:
++            is_fmt_on = True
++        elif comment.value in FMT_OFF:
++            is_fmt_on = False
++    return is_fmt_on
++
++
++def contains_fmt_on_at_column(container: LN, column: int) -> bool:
++    for child in container.children:
++        if (
++            isinstance(child, Node)
++            and first_leaf_column(child) == column
++            or isinstance(child, Leaf)
++            and child.column == column
++        ):
++            if fmt_on(child):
++                return True
++
++    return False
++
++
++def first_leaf_column(node: Node) -> Optional[int]:
++    for child in node.children:
++        if isinstance(child, Leaf):
++            return child.column
++    return None
+ 
+ 
+ def maybe_make_parens_invisible_in_atom(node: LN, parent: LN) -> bool:
+

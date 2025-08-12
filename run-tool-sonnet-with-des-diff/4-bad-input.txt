@@ -1,0 +1,62 @@
+
+# Description
+
+# PR - Fix unstable format involving backslash + whitespace at beginning of file 
+
+This PR fixes #922 - an unstable sort involve Python line continuation with \. The issue describes the problem pretty well.
+
+To my knowledge, there should be no situation where Black outputs a file formatted with empty lines at the beginning. By performing this check in the format function, we fix the above issue.
+
+NOTE: Open to feedback on this solution, threw it together pretty quickly after doing some basic debugging of how Black parses lines and whatnot. Open to feedback on it. Also, I'm pretty sure it doesn't break any invariants of the formatter, but would like feedback on that as well.
+
+# Issue #922 - Black produced different code on the second pass of the formatter: Explicit line join in the first line
+
+Operating system: macOS Mojave 10.14.5 (18F132)
+Python version: Python 3.7.3
+Black version: 19.3b0 (f3bb22a)
+Does also happen on master: yes
+
+Minified reproducer:
+
+\
+
+
+pass
+Black diff:
+
+--- source
++++ first pass
+@@ -1,5 +1,3 @@
+-\
+-
+
+ pass
+
+--- first pass
++++ second pass
+@@ -1,3 +1,2 @@
+-
+ pass
+Looks like some kind of boundary condition in EmptyLineTracker?
+
+# Diff
+
+diff --git a/black.py b/black.py
+index f7022d8..05edf1a 100644
+--- a/black.py
++++ b/black.py
+@@ -1480,7 +1480,13 @@ class EmptyLineTracker:
+         lines (two on module-level).
+         """
+         before, after = self._maybe_empty_lines(current_line)
+-        before -= self.previous_after
++        before = (
++            # Black should not insert empty lines at the beginning
++            # of the file
++            0
++            if self.previous_line is not None
++            else before - self.previous_after
++        )
+         self.previous_after = after
+         self.previous_line = current_line
+         return before, after
