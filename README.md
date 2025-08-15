@@ -9,20 +9,22 @@ mkdir benchmarking && cd benchmarking
 Clone the BugsInPy repo:
 
 ```bash
-git clone
+git clone git@github.com:soarsmu/BugsInPy.git
 ```
 
 Clone the benchmarking repo:
 
 ```bash
-git clone
+git clone git@github.com:sfu-capstone-llm/pyllmvalidate-benchmark.git
 ```
+Add a .env file with the OPENAI_API_KEY in the benchmarking repo. This is used in mode #1 to generate the incorrect patches.
 
 Clone the cli tool:
 
 ```bash
-git clone
+git clone git@github.com:sfu-capstone-llm/pyllmvalidate-cli.git
 ```
+Add the a .env file with the ANTHROPIC_API_KEY variable in the tool repo. This is used in mode #2 by the tool.
 
 Run docker container:
 
@@ -33,8 +35,6 @@ docker run -it --rm -p 1234:1234 \
   -v "$HOME/benchmarking/pyllmvalidate-benchmark:/workspace/pyllmvalidate-benchmark" \
   python38-uv
 ```
-
-Add a .env file with the OPENAI_API_KEY (required for mode #1 and #2).
 
 ## Modes
 
